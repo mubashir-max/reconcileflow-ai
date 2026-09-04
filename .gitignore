@@ -25,3 +25,6 @@ Thumbs.db
 *.egg-info/
 build/
 dist/
+
+# Local generation and verification files
+tmp/
