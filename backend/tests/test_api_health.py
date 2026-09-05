@@ -1,8 +1,10 @@
 from fastapi import APIRouter
 from httpx import ASGITransport, AsyncClient
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from reconcileflow.api import APISettings, Environment, create_app
+from reconcileflow.persistence import get_database
 
 
 def _app(**values):
@@ -58,6 +60,39 @@ async def test_readiness_endpoint_uses_validated_settings():
         "version": "0.2-test",
         "environment": "test",
     }
+
+
+@pytest.mark.anyio
+async def test_readiness_returns_safe_503_when_database_is_unavailable():
+    app = _app()
+
+    class UnavailableDatabase:
+        def check_connection(self):
+            raise OperationalError("SELECT 1", {}, RuntimeError("password=secret"))
+
+    app.dependency_overrides[get_database] = lambda: UnavailableDatabase()
+    response = await _get(app, "/api/v1/health/ready")
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "DATABASE_UNAVAILABLE",
+            "message": "The service is not ready.",
+            "details": [],
+        }
+    }
+    assert "secret" not in response.text
+    assert (await _get(app, "/api/v1/health/live")).status_code == 200
+
+
+@pytest.mark.anyio
+async def test_application_shutdown_disposes_initialized_engine():
+    app = _app()
+    database = app.state.database
+    _ = database.engine
+    assert database.is_initialized is True
+    async with app.router.lifespan_context(app):
+        pass
+    assert database.is_initialized is False
 
 
 @pytest.mark.anyio
