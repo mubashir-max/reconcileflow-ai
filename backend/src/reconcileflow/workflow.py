@@ -8,6 +8,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
+from reconcileflow.audit import AuditTrail, ReconciliationAuditRecord
 from reconcileflow.exporting import export_results_csv, export_results_xlsx
 from reconcileflow.ingestion import (
     IngestionConfig,
@@ -30,6 +31,7 @@ class ReconciliationRunSummary:
     results_requiring_review: int
     output_format: str
     output_path: Path
+    audit_record: ReconciliationAuditRecord
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -50,6 +52,7 @@ def run_reconciliation_workflow(
     gateway_ingestion: IngestionConfig | None = None,
     reconciliation: ReconciliationConfig | None = None,
     overwrite: bool = False,
+    audit_trail: AuditTrail | None = None,
 ) -> ReconciliationRunSummary:
     """Load, reconcile, export, and summarize one financial-data run.
 
@@ -58,33 +61,53 @@ def run_reconciliation_workflow(
     """
     destination = Path(output_path)
     suffix = destination.suffix.casefold()
-    if suffix not in {".csv", ".xlsx"}:
-        raise ValueError("output_path must use a .csv or .xlsx extension")
+    output_format = {".csv": "CSV", ".xlsx": "XLSX"}.get(suffix, "UNSUPPORTED")
+    reconciliation_config = reconciliation or ReconciliationConfig()
+    trail = audit_trail or AuditTrail()
+    trail.start(bank_path=bank_path, erp_path=erp_path, gateway_path=gateway_path, output_path=destination, output_format=output_format, config=reconciliation_config)
 
-    banks = load_bank_transactions(bank_path, bank_ingestion)
-    invoices = load_erp_invoices(erp_path, erp_ingestion)
-    gateways = (
-        load_gateway_settlements(gateway_path, gateway_ingestion)
-        if gateway_path is not None
-        else []
-    )
-    results = ReconciliationEngine(reconciliation).reconcile(banks, invoices, gateways)
+    try:
+        if suffix not in {".csv", ".xlsx"}:
+            raise ValueError("output_path must use a .csv or .xlsx extension")
+        trail.begin_stage("bank_ingestion")
+        banks = load_bank_transactions(bank_path, bank_ingestion)
+        trail.ingestion_completed("bank", len(banks))
+        trail.begin_stage("erp_ingestion")
+        invoices = load_erp_invoices(erp_path, erp_ingestion)
+        trail.ingestion_completed("erp", len(invoices))
+        trail.begin_stage("gateway_ingestion")
+        if gateway_path is not None:
+            gateways = load_gateway_settlements(gateway_path, gateway_ingestion)
+            trail.ingestion_completed("gateway", len(gateways))
+        else:
+            gateways = []
+            trail.gateway_skipped()
 
-    if suffix == ".csv":
-        written_path = export_results_csv(results, destination, overwrite=overwrite)
-        output_format = "CSV"
-    else:
-        written_path = export_results_xlsx(results, destination, overwrite=overwrite)
-        output_format = "XLSX"
+        trail.begin_stage("reconciliation")
+        results = ReconciliationEngine(reconciliation_config).reconcile(banks, invoices, gateways)
+        counts = Counter(result.status.value for result in results)
+        review_count = sum(result.requires_review for result in results)
+        trail.reconciliation_completed(total=len(results), status_counts=dict(counts), review_count=review_count)
 
-    counts = Counter(result.status.value for result in results)
-    return ReconciliationRunSummary(
-        bank_transactions_loaded=len(banks),
-        erp_invoices_loaded=len(invoices),
-        gateway_entries_loaded=len(gateways),
-        reconciliation_results=len(results),
-        result_counts_by_status=counts,
-        results_requiring_review=sum(result.requires_review for result in results),
-        output_format=output_format,
-        output_path=written_path,
-    )
+        trail.begin_stage("export")
+        if suffix == ".csv":
+            written_path = export_results_csv(results, destination, overwrite=overwrite)
+        else:
+            written_path = export_results_xlsx(results, destination, overwrite=overwrite)
+        trail.export_completed()
+        audit_record = trail.succeed()
+
+        return ReconciliationRunSummary(
+            bank_transactions_loaded=len(banks),
+            erp_invoices_loaded=len(invoices),
+            gateway_entries_loaded=len(gateways),
+            reconciliation_results=len(results),
+            result_counts_by_status=counts,
+            results_requiring_review=review_count,
+            output_format=output_format,
+            output_path=written_path,
+            audit_record=audit_record,
+        )
+    except Exception as error:
+        trail.fail(error)
+        raise
