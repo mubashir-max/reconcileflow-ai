@@ -6,7 +6,7 @@ from enum import StrEnum
 from importlib.metadata import version
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +35,19 @@ class APISettings(BaseSettings):
     debug: bool = False
     api_prefix: str = "/api/v1"
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
+    database_url: SecretStr = SecretStr("sqlite+pysqlite:///:memory:")
+    database_echo: bool = False
+    database_pool_size: int = Field(default=5, ge=1, le=100)
+    database_max_overflow: int = Field(default=10, ge=0, le=200)
+    database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, value: SecretStr) -> SecretStr:
+        url = value.get_secret_value().strip()
+        if not url.startswith(("postgresql+psycopg://", "sqlite+pysqlite://")):
+            raise ValueError("database_url must use postgresql+psycopg or sqlite+pysqlite")
+        return SecretStr(url)
 
     @field_validator("app_name", "app_version")
     @classmethod

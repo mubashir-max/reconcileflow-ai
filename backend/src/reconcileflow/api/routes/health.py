@@ -3,9 +3,13 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.exc import SQLAlchemyError
+
+from reconcileflow.persistence.dependencies import DatabaseDependency
 
 from ..config import APISettings
 from ..dependencies import get_settings
+from ..errors import APIError
 from ..schemas import HealthResponse
 
 
@@ -24,8 +28,15 @@ def liveness(settings: SettingsDependency) -> HealthResponse:
 
 
 @router.get("/ready", response_model=HealthResponse, summary="Check application readiness")
-def readiness(settings: SettingsDependency) -> HealthResponse:
-    # Settings have already been parsed and validated before the app is created.
+def readiness(settings: SettingsDependency, database: DatabaseDependency) -> HealthResponse:
+    try:
+        database.check_connection()
+    except SQLAlchemyError as error:
+        raise APIError(
+            status_code=503,
+            code="DATABASE_UNAVAILABLE",
+            message="The service is not ready.",
+        ) from error
     return HealthResponse(
         status="ready",
         service=settings.app_name,

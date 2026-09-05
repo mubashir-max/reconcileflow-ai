@@ -34,3 +34,16 @@ def test_settings_are_immutable():
     settings = APISettings(_env_file=None)
     with pytest.raises(ValidationError):
         settings.debug = True
+
+
+def test_database_settings_load_without_exposing_password(monkeypatch):
+    url = "postgresql+psycopg://api_user:top-secret@localhost:5432/reconcileflow"
+    monkeypatch.setenv("RECONCILEFLOW_DATABASE_URL", url)
+    settings = APISettings(_env_file=None)
+    assert settings.database_url.get_secret_value() == url
+    assert "top-secret" not in repr(settings)
+
+
+def test_invalid_database_scheme_is_rejected():
+    with pytest.raises(ValidationError, match="database_url"):
+        APISettings(database_url="mysql://user:password@localhost/database", _env_file=None)

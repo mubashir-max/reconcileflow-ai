@@ -12,6 +12,8 @@ dependencies = [
     "fastapi>=0.116",
     "openpyxl>=3.1",
     "pydantic-settings>=2.10",
+    "psycopg[binary]>=3.2",
+    "sqlalchemy>=2.0,<2.1",
     "uvicorn>=0.35",
 ]
 
