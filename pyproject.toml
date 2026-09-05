@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "AI-powered financial reconciliation SaaS"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "openpyxl>=3.1",
+]
 
 [tool.setuptools]
 package-dir = {"" = "backend/src"}
