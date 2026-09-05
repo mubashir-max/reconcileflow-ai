@@ -9,7 +9,10 @@ description = "AI-powered financial reconciliation SaaS"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.116",
     "openpyxl>=3.1",
+    "pydantic-settings>=2.10",
+    "uvicorn>=0.35",
 ]
 
 [tool.setuptools]
@@ -24,5 +27,6 @@ pythonpath = ["backend/src"]
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.28",
     "pytest>=8.4",
 ]
