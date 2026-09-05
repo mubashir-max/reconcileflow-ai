@@ -9,6 +9,7 @@ description = "AI-powered financial reconciliation SaaS"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.16",
     "fastapi>=0.116",
     "openpyxl>=3.1",
     "pydantic-settings>=2.10",
