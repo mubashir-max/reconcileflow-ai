@@ -8,6 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from reconcileflow.persistence.errors import PersistenceConflictError, RecordNotFoundError
+
 
 LOGGER = logging.getLogger("reconcileflow.api")
 
@@ -31,6 +33,14 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(APIError)
     async def handle_api_error(_request: Request, error: APIError) -> JSONResponse:
         return _response(error.status_code, error.code, error.message)
+
+    @app.exception_handler(RecordNotFoundError)
+    async def handle_not_found(_request: Request, _error: RecordNotFoundError) -> JSONResponse:
+        return _response(404, "RESOURCE_NOT_FOUND", "The requested resource was not found.")
+
+    @app.exception_handler(PersistenceConflictError)
+    async def handle_persistence_conflict(_request: Request, _error: PersistenceConflictError) -> JSONResponse:
+        return _response(409, "PERSISTENCE_CONFLICT", "The request conflicts with existing data.")
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(_request: Request, error: RequestValidationError) -> JSONResponse:
