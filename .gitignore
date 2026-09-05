@@ -28,3 +28,4 @@ dist/
 
 # Local generation and verification files
 tmp/
+output/
