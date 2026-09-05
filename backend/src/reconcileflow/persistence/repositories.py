@@ -73,6 +73,14 @@ class ReconciliationRunRepository:
         statement = statement.order_by(ReconciliationRunRecord.created_at.desc(), ReconciliationRunRecord.id).limit(page.limit).offset(page.offset)
         return list(self._session.scalars(statement))
 
+    def count(self, *, status: str | None = None) -> int:
+        statement = select(func.count()).select_from(ReconciliationRunRecord)
+        if status is not None:
+            if status not in self._TRANSITIONS:
+                raise ValueError("invalid reconciliation run status")
+            statement = statement.where(ReconciliationRunRecord.status == status)
+        return self._session.scalar(statement) or 0
+
     def transition(
         self,
         run_id: uuid.UUID,
