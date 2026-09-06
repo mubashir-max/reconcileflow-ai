@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from importlib.metadata import version
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
@@ -40,6 +41,8 @@ class APISettings(BaseSettings):
     database_pool_size: int = Field(default=5, ge=1, le=100)
     database_max_overflow: int = Field(default=10, ge=0, le=200)
     database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    upload_directory: Path = Path("var/uploads")
+    max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
 
     @field_validator("database_url")
     @classmethod
@@ -65,4 +68,11 @@ class APISettings(BaseSettings):
             raise ValueError("api_prefix must start with '/'")
         if value == "/" or value.endswith("/"):
             raise ValueError("api_prefix must be a non-root path without a trailing slash")
+        return value
+
+    @field_validator("upload_directory")
+    @classmethod
+    def validate_upload_directory(cls, value: Path) -> Path:
+        if not str(value).strip():
+            raise ValueError("upload_directory must not be blank")
         return value
