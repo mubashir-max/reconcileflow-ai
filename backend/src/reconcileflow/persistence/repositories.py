@@ -15,7 +15,17 @@ from reconcileflow.audit import AuditEvent
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationResult
 
 from .errors import InvalidStatusTransitionError, PersistenceConflictError, RecordNotFoundError
-from .models import AuditEventRecord, ConfigurationSnapshotRecord, ReconciliationResultRecord, ReconciliationRunRecord, RESULT_STATUSES, SourceFileRecord
+from .models import (
+    AuditEventRecord,
+    ConfigurationSnapshotRecord,
+    OrganizationMembershipRecord,
+    OrganizationRecord,
+    ReconciliationResultRecord,
+    ReconciliationRunRecord,
+    RESULT_STATUSES,
+    SourceFileRecord,
+    UserRecord,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +46,64 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("timestamps must include timezone information")
     return value.astimezone(UTC)
+
+
+class OrganizationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(self, *, name: str, slug: str) -> OrganizationRecord:
+        record = OrganizationRecord(name=name.strip(), slug=slug)
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def slug_exists(self, slug: str) -> bool:
+        return self._session.scalar(select(OrganizationRecord.id).where(OrganizationRecord.slug == slug)) is not None
+
+
+class UserRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(self, *, email: str, password_hash: str, display_name: str | None = None) -> UserRecord:
+        record = UserRecord(
+            email=email,
+            password_hash=password_hash,
+            display_name=display_name.strip() if display_name else None,
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get_by_email(self, email: str) -> UserRecord | None:
+        return self._session.scalar(select(UserRecord).where(UserRecord.email == email))
+
+    def email_exists(self, email: str) -> bool:
+        return self._session.scalar(select(UserRecord.id).where(UserRecord.email == email)) is not None
+
+
+class OrganizationMembershipRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(
+        self, *, organization_id: uuid.UUID, user_id: uuid.UUID, role: str
+    ) -> OrganizationMembershipRecord:
+        record = OrganizationMembershipRecord(
+            organization_id=organization_id, user_id=user_id, role=role
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def list_for_user(self, user_id: uuid.UUID) -> list[OrganizationMembershipRecord]:
+        statement = (
+            select(OrganizationMembershipRecord)
+            .where(OrganizationMembershipRecord.user_id == user_id)
+            .order_by(OrganizationMembershipRecord.created_at, OrganizationMembershipRecord.id)
+        )
+        return list(self._session.scalars(statement))
 
 
 class ReconciliationRunRepository:

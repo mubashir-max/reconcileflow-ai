@@ -8,7 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .errors import PersistenceConflictError
-from .repositories import AuditEventRepository, ConfigurationSnapshotRepository, ReconciliationResultRepository, ReconciliationRunRepository, SourceFileRepository
+from .repositories import (
+    AuditEventRepository,
+    ConfigurationSnapshotRepository,
+    OrganizationMembershipRepository,
+    OrganizationRepository,
+    ReconciliationResultRepository,
+    ReconciliationRunRepository,
+    SourceFileRepository,
+    UserRepository,
+)
 
 
 class PersistenceUnitOfWork:
@@ -21,6 +30,9 @@ class PersistenceUnitOfWork:
         self.configurations = ConfigurationSnapshotRepository(session)
         self.results = ReconciliationResultRepository(session)
         self.audit_events = AuditEventRepository(session)
+        self.organizations = OrganizationRepository(session)
+        self.users = UserRepository(session)
+        self.memberships = OrganizationMembershipRepository(session)
         self._active = False
 
     def __enter__(self) -> PersistenceUnitOfWork:

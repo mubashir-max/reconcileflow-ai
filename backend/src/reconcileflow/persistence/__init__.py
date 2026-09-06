@@ -15,7 +15,17 @@ from .models import (
     SourceFileRecord,
     UserRecord,
 )
-from .repositories import AuditEventRepository, ConfigurationSnapshotRepository, Page, ReconciliationResultRepository, ReconciliationRunRepository, SourceFileRepository
+from .repositories import (
+    AuditEventRepository,
+    ConfigurationSnapshotRepository,
+    OrganizationMembershipRepository,
+    OrganizationRepository,
+    Page,
+    ReconciliationResultRepository,
+    ReconciliationRunRepository,
+    SourceFileRepository,
+    UserRepository,
+)
 from .unit_of_work import PersistenceUnitOfWork
 
 __all__ = [
@@ -29,7 +39,9 @@ __all__ = [
     "InvalidStatusTransitionError",
     "MEMBERSHIP_ROLES",
     "OrganizationMembershipRecord",
+    "OrganizationMembershipRepository",
     "OrganizationRecord",
+    "OrganizationRepository",
     "Page",
     "PersistenceConflictError",
     "PersistenceError",
@@ -43,6 +55,7 @@ __all__ = [
     "SourceFileRecord",
     "SourceFileRepository",
     "UserRecord",
+    "UserRepository",
     "get_database",
     "get_db_session",
 ]
