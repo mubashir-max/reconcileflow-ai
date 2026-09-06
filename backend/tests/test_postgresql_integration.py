@@ -46,6 +46,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "organizations",
             "organization_memberships",
             "users",
+            "refresh_tokens",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
 
@@ -61,6 +62,17 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                 "email": email.upper(),
                 "password": "correct horse battery staple",
             })
+            access_token = logged_in.json()["access_token"]
+            refresh_token = logged_in.json()["refresh_token"]
+            current_user = await client.get(
+                "/api/v1/auth/me", headers={"Authorization": f"Bearer {access_token}"}
+            )
+            refreshed = await client.post(
+                "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+            )
+            logged_out = await client.post(
+                "/api/v1/auth/logout", json={"refresh_token": refreshed.json()["refresh_token"]}
+            )
             created = await client.post("/api/v1/reconciliation-runs", json={})
             run_id = created.json()["id"]
             for source_type, filename in (
@@ -83,6 +95,11 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert registered.json()["membership"]["role"] == "OWNER"
         assert logged_in.status_code == 200
         assert logged_in.json()["authenticated"] is True
+        assert current_user.status_code == 200
+        assert current_user.json()["user"]["email"] == email
+        assert refreshed.status_code == 200
+        assert refreshed.json()["refresh_token"] != refresh_token
+        assert logged_out.status_code == 204
         assert created.status_code == 201
         assert executed.status_code == 200
         assert executed.json()["status"] == "SUCCEEDED"

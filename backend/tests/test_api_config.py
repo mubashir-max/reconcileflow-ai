@@ -53,3 +53,26 @@ def test_upload_settings_are_validated(tmp_path):
     settings = APISettings(upload_directory=tmp_path / "uploads", max_upload_size_bytes=2048, _env_file=None)
     assert settings.upload_directory == tmp_path / "uploads"
     assert settings.max_upload_size_bytes == 2048
+
+
+def test_token_settings_are_secret_and_validated():
+    settings = APISettings(token_signing_secret="a" * 32, access_token_ttl_minutes=10, refresh_token_ttl_days=7, _env_file=None)
+    assert settings.token_signing_secret.get_secret_value() == "a" * 32
+    assert "a" * 32 not in repr(settings)
+    assert settings.access_token_ttl_minutes == 10
+    assert settings.refresh_token_ttl_days == 7
+
+
+def test_short_token_secret_is_rejected():
+    with pytest.raises(ValidationError, match="token_signing_secret"):
+        APISettings(token_signing_secret="too-short", _env_file=None)
+
+
+def test_blank_token_secret_is_rejected():
+    with pytest.raises(ValidationError, match="token_signing_secret"):
+        APISettings(token_signing_secret=" " * 32, _env_file=None)
+
+
+def test_production_rejects_development_token_secret():
+    with pytest.raises(ValidationError, match="production requires"):
+        APISettings(environment="production", _env_file=None)
