@@ -1,6 +1,6 @@
 # ReconcileFlow AI
 
-ReconcileFlow AI is a financial-reconciliation project for matching bank transactions, ERP invoices, and payment-gateway settlements. Version 0.1 provides a tested Python reconciliation core built around deterministic, explainable rules. Agentic AI, human-approval screens, APIs, and SaaS infrastructure are planned work and are not part of v0.1.
+ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.2 exposes the deterministic, explainable reconciliation core through a persistent FastAPI service backed by PostgreSQL.
 
 All repository fixtures are synthetic and anonymized. They contain no real customers, accounts, cards, or payments.
 
@@ -15,6 +15,18 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - One-call end-to-end workflow
 - Structured, privacy-conscious logging and immutable audit records
 - Automated unit, integration, and end-to-end tests
+
+## v0.2 capabilities
+
+- Versioned FastAPI endpoints and generated OpenAPI documentation
+- Persistent reconciliation runs, configurations, file metadata, results, and audit events
+- SQLAlchemy repositories and atomic transaction boundaries
+- PostgreSQL schema evolution through Alembic
+- Secure, bounded CSV/XLSX uploads stored under server-generated keys
+- API-driven reconciliation execution and paginated result retrieval
+- Result filtering by reconciliation status and review requirement
+- Docker Compose environment with health checks and durable local volumes
+- Automated testing against SQLite and PostgreSQL
 
 ## Architecture
 
@@ -46,15 +58,20 @@ The layers remain independent: ingestion handles provider formats, models enforc
 
 ```text
 backend/src/reconcileflow/
+  api/                Versioned FastAPI application, schemas, and routes
   audit/              Structured events and immutable audit records
   exporting/          CSV, XLSX, and JSON-compatible result output
   ingestion/          Flexible source-file loading and normalization
   models/             Bank, invoice, gateway, and status models
   reconciliation/     Configuration, results, and deterministic rules
+  persistence/        SQLAlchemy records, repositories, and transactions
+  storage/            Safe local uploaded-file storage
   workflow.py         End-to-end application orchestration
 backend/tests/         Automated test suite
 data/sample/           Synthetic CSV/XLSX fixtures and expected outcomes
 scripts/               Fixture generation and runnable v0.1 demonstration
+backend/migrations/    Alembic database migrations
+docs/                  Release notes and release checklists
 ```
 
 Detailed fixture columns and scenarios are documented in [`data/sample/README.md`](data/sample/README.md).
@@ -64,6 +81,7 @@ Detailed fixture columns and scenarios are documented in [`data/sample/README.md
 - Python 3.12 or newer
 - Git
 - PowerShell commands below are written for Windows
+- Docker Desktop with WSL 2 for the PostgreSQL container workflow
 
 ## Installation
 
@@ -97,7 +115,7 @@ This installs ReconcileFlow in editable mode, including test dependencies. Witho
 python -m pytest
 ```
 
-The test suite covers models, ingestion, matching, exports, workflow execution, auditing, privacy protections, and the demo.
+The test suite covers models, ingestion, matching, exports, workflow execution, auditing, the API, persistence, privacy protections, containers, and the demo. PostgreSQL integration tests run automatically in GitHub Actions when `RECONCILEFLOW_TEST_POSTGRESQL_URL` is configured.
 
 ## Run the v0.1 demonstration
 
@@ -225,13 +243,62 @@ Audit logs intentionally exclude:
 
 Original exceptions are still re-raised to the caller for controlled application-level handling.
 
+## Versioned API
+
+Start the local service with Docker Compose:
+
+```powershell
+docker compose up --build -d
+```
+
+Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.2 endpoints are:
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/v1/health/live` | Confirm the API process is running. |
+| `GET /api/v1/health/ready` | Confirm the API can reach its database. |
+| `POST /api/v1/reconciliation-runs` | Create a pending run and configuration snapshot. |
+| `GET /api/v1/reconciliation-runs` | List runs with pagination and status filtering. |
+| `GET /api/v1/reconciliation-runs/{run_id}` | Retrieve one run and its status. |
+| `POST /api/v1/reconciliation-runs/{run_id}/files` | Upload one bank, ERP, or gateway source file. |
+| `GET /api/v1/reconciliation-runs/{run_id}/files` | List uploaded-file metadata for a run. |
+| `GET /api/v1/files/{file_id}` | Retrieve one file's safe metadata. |
+| `POST /api/v1/reconciliation-runs/{run_id}/execute` | Execute a pending run synchronously. |
+| `GET /api/v1/reconciliation-runs/{run_id}/results` | List and filter persisted results. |
+| `GET /api/v1/results/{result_id}` | Retrieve one explainable result. |
+| `GET /api/v1/reconciliation-runs/{run_id}/audit-events` | Retrieve ordered audit events. |
+
+### End-to-end API workflow
+
+The easiest way to learn the workflow is through `/docs`: open each endpoint, select **Try it out**, and execute these steps in order:
+
+1. Create a reconciliation run and copy its `id`.
+2. Upload `data/sample/bank_transactions.csv` as `BANK_TRANSACTIONS`.
+3. Upload `data/sample/erp_invoices.csv` as `ERP_INVOICES`.
+4. Optionally upload `data/sample/gateway_settlements.csv` as `GATEWAY_SETTLEMENTS`.
+5. Execute the run using its ID.
+6. Retrieve its results and audit events.
+
+Bank and ERP inputs are required. One file of each source type is allowed per pending run. A succeeded or failed run cannot execute again. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
+
+### Database migrations
+
+Containers apply migrations automatically. For a directly installed application with `RECONCILEFLOW_DATABASE_URL` configured, run:
+
+```powershell
+alembic upgrade head
+alembic current
+```
+
+Create new migration revisions only when the SQLAlchemy persistence schema changes.
+
 ## Current limitations
 
-Version 0.1 is a local Python core and demonstration—not a deployed SaaS product. It does not yet include:
+Version 0.2 is a persistent backend foundation, not yet a deployed multi-user SaaS product. It does not include:
 
-- FastAPI endpoints or authentication
-- PostgreSQL persistence or tenant isolation
-- Background jobs and durable audit storage
+- Authentication, authorization, or tenant isolation
+- Background job queues or asynchronous reconciliation execution
+- Cloud object storage
 - Web, Android, or iOS interfaces
 - Human approval and override screens
 - AI-assisted matching, RAG, or LangGraph orchestration

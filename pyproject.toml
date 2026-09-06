@@ -28,6 +28,9 @@ where = ["backend/src"]
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 pythonpath = ["backend/src"]
+markers = [
+    "postgresql: requires a PostgreSQL database configured for integration testing",
+]
 
 [project.optional-dependencies]
 dev = [
