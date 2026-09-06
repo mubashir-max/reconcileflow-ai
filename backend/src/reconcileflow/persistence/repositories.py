@@ -176,14 +176,26 @@ class ReconciliationResultRepository:
             raise RecordNotFoundError(f"reconciliation result {result_id} was not found")
         return record
 
-    def list_for_run(self, run_id: uuid.UUID, *, page: Page = Page(), status: str | None = None) -> list[ReconciliationResultRecord]:
+    def list_for_run(self, run_id: uuid.UUID, *, page: Page = Page(), status: str | None = None, requires_review: bool | None = None) -> list[ReconciliationResultRecord]:
         statement = select(ReconciliationResultRecord).where(ReconciliationResultRecord.run_id == run_id)
         if status is not None:
             if status not in RESULT_STATUSES:
                 raise ValueError("invalid reconciliation result status")
             statement = statement.where(ReconciliationResultRecord.status == status)
+        if requires_review is not None:
+            statement = statement.where(ReconciliationResultRecord.requires_review == requires_review)
         statement = statement.order_by(ReconciliationResultRecord.created_at, ReconciliationResultRecord.external_result_id).limit(page.limit).offset(page.offset)
         return list(self._session.scalars(statement))
+
+    def count_for_run(self, run_id: uuid.UUID, *, status: str | None = None, requires_review: bool | None = None) -> int:
+        statement = select(func.count()).select_from(ReconciliationResultRecord).where(ReconciliationResultRecord.run_id == run_id)
+        if status is not None:
+            if status not in RESULT_STATUSES:
+                raise ValueError("invalid reconciliation result status")
+            statement = statement.where(ReconciliationResultRecord.status == status)
+        if requires_review is not None:
+            statement = statement.where(ReconciliationResultRecord.requires_review == requires_review)
+        return self._session.scalar(statement) or 0
 
     @staticmethod
     def _to_record(run_id: uuid.UUID, result: ReconciliationResult) -> ReconciliationResultRecord:
@@ -225,3 +237,7 @@ class AuditEventRepository:
     def list_for_run(self, run_id: uuid.UUID, *, page: Page = Page()) -> list[AuditEventRecord]:
         statement = select(AuditEventRecord).where(AuditEventRecord.run_id == run_id).order_by(AuditEventRecord.sequence_number).limit(page.limit).offset(page.offset)
         return list(self._session.scalars(statement))
+
+    def count_for_run(self, run_id: uuid.UUID) -> int:
+        statement = select(func.count()).select_from(AuditEventRecord).where(AuditEventRecord.run_id == run_id)
+        return self._session.scalar(statement) or 0
