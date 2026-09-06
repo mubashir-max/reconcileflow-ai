@@ -70,6 +70,9 @@ class UserRecord(Base):
     memberships: Mapped[list[OrganizationMembershipRecord]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    refresh_tokens: Mapped[list[RefreshTokenRecord]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class OrganizationMembershipRecord(Base):
@@ -95,6 +98,31 @@ class OrganizationMembershipRecord(Base):
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="memberships")
     user: Mapped[UserRecord] = relationship(back_populates="memberships")
+
+
+class RefreshTokenRecord(Base):
+    """Hashed, revocable server-side state for one issued refresh token."""
+
+    __tablename__ = "refresh_tokens"
+    __table_args__ = (
+        CheckConstraint("length(token_hash) = 64", name="valid_token_hash"),
+        CheckConstraint("expires_at > created_at", name="valid_expiration"),
+        Index("ix_refresh_tokens_user_expires_at", "user_id", "expires_at"),
+        Index("ix_refresh_tokens_family_revoked_at", "family_id", "revoked_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    family_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("refresh_tokens.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    user: Mapped[UserRecord] = relationship(back_populates="refresh_tokens")
 
 
 class ReconciliationRunRecord(Base):

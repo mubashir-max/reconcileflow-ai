@@ -7,7 +7,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +43,20 @@ class APISettings(BaseSettings):
     database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
     upload_directory: Path = Path("var/uploads")
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
+    token_signing_secret: SecretStr = SecretStr("development-only-change-this-token-secret")
+    token_issuer: str = Field(default="reconcileflow-api", min_length=1, max_length=200)
+    token_audience: str = Field(default="reconcileflow-clients", min_length=1, max_length=200)
+    access_token_ttl_minutes: int = Field(default=15, ge=1, le=60)
+    refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
+
+    @model_validator(mode="after")
+    def validate_token_security(self) -> APISettings:
+        secret = self.token_signing_secret.get_secret_value()
+        if len(secret) < 32 or not secret.strip():
+            raise ValueError("token_signing_secret must contain at least 32 characters")
+        if self.environment is Environment.PRODUCTION and secret == "development-only-change-this-token-secret":
+            raise ValueError("production requires a non-default token_signing_secret")
+        return self
 
     @field_validator("database_url")
     @classmethod
@@ -52,7 +66,7 @@ class APISettings(BaseSettings):
             raise ValueError("database_url must use postgresql+psycopg or sqlite+pysqlite")
         return SecretStr(url)
 
-    @field_validator("app_name", "app_version")
+    @field_validator("app_name", "app_version", "token_issuer", "token_audience")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()

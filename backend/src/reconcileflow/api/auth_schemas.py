@@ -98,3 +98,23 @@ class LoginResponse(StrictModel):
     authenticated: bool
     user: UserResponse
     memberships: list[MembershipResponse]
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int = Field(gt=0)
+
+
+class RefreshTokenRequest(StrictModel):
+    refresh_token: str = Field(min_length=20, max_length=4096)
+
+
+class TokenPairResponse(StrictModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int = Field(gt=0)
+
+
+class CurrentUserResponse(StrictModel):
+    user: UserResponse
+    memberships: list[MembershipResponse]

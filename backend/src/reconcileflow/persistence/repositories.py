@@ -22,6 +22,7 @@ from .models import (
     OrganizationRecord,
     ReconciliationResultRecord,
     ReconciliationRunRecord,
+    RefreshTokenRecord,
     RESULT_STATUSES,
     SourceFileRecord,
     UserRecord,
@@ -79,6 +80,9 @@ class UserRepository:
     def get_by_email(self, email: str) -> UserRecord | None:
         return self._session.scalar(select(UserRecord).where(UserRecord.email == email))
 
+    def get(self, user_id: uuid.UUID) -> UserRecord | None:
+        return self._session.get(UserRecord, user_id)
+
     def email_exists(self, email: str) -> bool:
         return self._session.scalar(select(UserRecord.id).where(UserRecord.email == email)) is not None
 
@@ -104,6 +108,76 @@ class OrganizationMembershipRepository:
             .order_by(OrganizationMembershipRecord.created_at, OrganizationMembershipRecord.id)
         )
         return list(self._session.scalars(statement))
+
+
+class RefreshTokenRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(
+        self,
+        *,
+        token_id: uuid.UUID,
+        user_id: uuid.UUID,
+        family_id: uuid.UUID,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> RefreshTokenRecord:
+        record = RefreshTokenRecord(
+            id=token_id,
+            user_id=user_id,
+            family_id=family_id,
+            token_hash=token_hash,
+            expires_at=_utc(expires_at),
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get_by_hash(self, token_hash: str, *, lock: bool = False) -> RefreshTokenRecord | None:
+        statement = select(RefreshTokenRecord).where(RefreshTokenRecord.token_hash == token_hash)
+        if lock:
+            statement = statement.with_for_update()
+        return self._session.scalar(statement)
+
+    def rotate(
+        self,
+        current: RefreshTokenRecord,
+        *,
+        replacement_id: uuid.UUID,
+        replacement_hash: str,
+        replacement_expires_at: datetime,
+        at: datetime,
+    ) -> RefreshTokenRecord:
+        replacement = self.create(
+            token_id=replacement_id,
+            user_id=current.user_id,
+            family_id=current.family_id,
+            token_hash=replacement_hash,
+            expires_at=replacement_expires_at,
+        )
+        current.revoked_at = _utc(at)
+        current.replaced_by_id = replacement.id
+        self._session.flush()
+        return replacement
+
+    def revoke(self, record: RefreshTokenRecord, *, at: datetime) -> None:
+        if record.revoked_at is None:
+            record.revoked_at = _utc(at)
+            self._session.flush()
+
+    def revoke_family(self, family_id: uuid.UUID, *, at: datetime) -> int:
+        records = list(self._session.scalars(
+            select(RefreshTokenRecord).where(
+                RefreshTokenRecord.family_id == family_id,
+                RefreshTokenRecord.revoked_at.is_(None),
+            ).with_for_update()
+        ))
+        revoked_at = _utc(at)
+        for record in records:
+            record.revoked_at = revoked_at
+        self._session.flush()
+        return len(records)
 
 
 class ReconciliationRunRepository:

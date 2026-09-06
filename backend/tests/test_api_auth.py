@@ -5,7 +5,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from reconcileflow.api import APISettings, create_app
-from reconcileflow.persistence import Base, OrganizationMembershipRecord, OrganizationRecord, UserRecord
+from reconcileflow.persistence import Base, OrganizationMembershipRecord, OrganizationRecord, RefreshTokenRecord, UserRecord
 
 
 @pytest.fixture
@@ -64,7 +64,16 @@ async def test_login_accepts_normalized_email_and_correct_password(auth_app):
     assert response.status_code == 200
     assert response.json()["authenticated"] is True
     assert response.json()["memberships"][0]["role"] == "OWNER"
+    assert response.json()["token_type"] == "bearer"
+    assert response.json()["access_token"]
+    assert response.json()["refresh_token"]
+    assert response.json()["expires_in"] > 0
     assert "password" not in response.text.lower()
+
+    with auth_app.state.database.session() as session:
+        stored = session.scalar(select(RefreshTokenRecord))
+        assert stored.token_hash != response.json()["refresh_token"]
+        assert len(stored.token_hash) == 64
 
 
 @pytest.mark.anyio
@@ -142,4 +151,100 @@ async def test_openapi_documents_authentication_without_password_hash(auth_app):
 
     assert "/api/v1/auth/register" in document["paths"]
     assert "/api/v1/auth/login" in document["paths"]
+    assert "/api/v1/auth/refresh" in document["paths"]
+    assert "/api/v1/auth/logout" in document["paths"]
+    assert "/api/v1/auth/me" in document["paths"]
+    assert "BearerAuth" in document["components"]["securitySchemes"]
     assert "password_hash" not in str(document)
+
+
+@pytest.mark.anyio
+async def test_access_token_authenticates_current_user(auth_app):
+    async with AsyncClient(transport=ASGITransport(app=auth_app, raise_app_exceptions=False), base_url="http://test") as client:
+        await client.post("/api/v1/auth/register", json=_registration())
+        login = await client.post("/api/v1/auth/login", json={
+            "email": "owner@example.com", "password": "correct horse battery staple"
+        })
+        token = login.json()["access_token"]
+        response = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "owner@example.com"
+    assert response.json()["memberships"][0]["role"] == "OWNER"
+
+
+@pytest.mark.anyio
+async def test_missing_modified_and_wrong_type_access_tokens_are_rejected(auth_app):
+    async with AsyncClient(transport=ASGITransport(app=auth_app, raise_app_exceptions=False), base_url="http://test") as client:
+        await client.post("/api/v1/auth/register", json=_registration())
+        login = await client.post("/api/v1/auth/login", json={
+            "email": "owner@example.com", "password": "correct horse battery staple"
+        })
+        access = login.json()["access_token"]
+        refresh = login.json()["refresh_token"]
+        responses = [
+            await client.get("/api/v1/auth/me"),
+            await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access[:-1]}x"}),
+            await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {refresh}"}),
+        ]
+
+    assert [response.status_code for response in responses] == [401, 401, 401]
+    assert all(response.json()["error"]["code"] == "INVALID_ACCESS_TOKEN" for response in responses)
+
+
+@pytest.mark.anyio
+async def test_refresh_rotates_tokens_and_reuse_revokes_family(auth_app):
+    async with AsyncClient(transport=ASGITransport(app=auth_app, raise_app_exceptions=False), base_url="http://test") as client:
+        await client.post("/api/v1/auth/register", json=_registration())
+        login = await client.post("/api/v1/auth/login", json={
+            "email": "owner@example.com", "password": "correct horse battery staple"
+        })
+        original = login.json()["refresh_token"]
+        rotated = await client.post("/api/v1/auth/refresh", json={"refresh_token": original})
+        replacement = rotated.json()["refresh_token"]
+        reused = await client.post("/api/v1/auth/refresh", json={"refresh_token": original})
+        family_revoked = await client.post("/api/v1/auth/refresh", json={"refresh_token": replacement})
+
+    assert rotated.status_code == 200
+    assert rotated.json()["access_token"] != login.json()["access_token"]
+    assert replacement != original
+    assert reused.status_code == 401
+    assert reused.json()["error"]["code"] == "REFRESH_TOKEN_REUSED"
+    assert family_revoked.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_logout_revokes_refresh_token(auth_app):
+    async with AsyncClient(transport=ASGITransport(app=auth_app, raise_app_exceptions=False), base_url="http://test") as client:
+        await client.post("/api/v1/auth/register", json=_registration())
+        login = await client.post("/api/v1/auth/login", json={
+            "email": "owner@example.com", "password": "correct horse battery staple"
+        })
+        refresh = login.json()["refresh_token"]
+        logout = await client.post("/api/v1/auth/logout", json={"refresh_token": refresh})
+        after_logout = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+
+    assert logout.status_code == 204
+    assert after_logout.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_disabled_user_cannot_refresh_or_use_access_token(auth_app):
+    async with AsyncClient(transport=ASGITransport(app=auth_app, raise_app_exceptions=False), base_url="http://test") as client:
+        await client.post("/api/v1/auth/register", json=_registration())
+        login = await client.post("/api/v1/auth/login", json={
+            "email": "owner@example.com", "password": "correct horse battery staple"
+        })
+        with auth_app.state.database.session() as session:
+            user = session.scalar(select(UserRecord))
+            user.is_active = False
+            session.commit()
+        access_response = await client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {login.json()['access_token']}"}
+        )
+        refresh_response = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": login.json()["refresh_token"]}
+        )
+
+    assert access_response.status_code == 401
+    assert refresh_response.status_code == 401
