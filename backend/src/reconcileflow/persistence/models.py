@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from reconcileflow.persistence.base import Base
@@ -23,6 +23,78 @@ RESULT_STATUSES = (
     "EXACT_MATCH", "SETTLEMENT_MATCH", "TOLERANCE_MATCH",
     "MANY_TO_ONE_MATCH", "ONE_TO_MANY_MATCH", "DUPLICATE", "REQUIRES_REVIEW",
 )
+MEMBERSHIP_ROLES = ("OWNER", "ADMIN", "ANALYST", "VIEWER")
+
+
+class OrganizationRecord(Base):
+    """A tenant that owns an isolated ReconcileFlow workspace."""
+
+    __tablename__ = "organizations"
+    __table_args__ = (
+        CheckConstraint("length(trim(name)) > 0", name="nonblank_name"),
+        CheckConstraint("length(trim(slug)) > 0", name="nonblank_slug"),
+        CheckConstraint("slug = lower(slug) AND slug NOT LIKE '% %'", name="normalized_slug"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    memberships: Mapped[list[OrganizationMembershipRecord]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan"
+    )
+
+
+class UserRecord(Base):
+    """A login identity; credentials are stored only as password hashes."""
+
+    __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("length(trim(email)) > 3", name="nonblank_email"),
+        CheckConstraint("email = lower(trim(email))", name="normalized_email"),
+        CheckConstraint("email LIKE '_%@_%'", name="email_has_at_sign"),
+        CheckConstraint("length(trim(password_hash)) > 0", name="nonblank_password_hash"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(150))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    memberships: Mapped[list[OrganizationMembershipRecord]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class OrganizationMembershipRecord(Base):
+    """Assign a user a role inside one organization."""
+
+    __tablename__ = "organization_memberships"
+    __table_args__ = (
+        CheckConstraint(f"role IN {MEMBERSHIP_ROLES}", name="valid_role"),
+        UniqueConstraint("organization_id", "user_id", name="uq_organization_memberships_organization_user"),
+        Index("ix_organization_memberships_user_active", "user_id", "is_active"),
+        Index("ix_organization_memberships_organization_role", "organization_id", "role"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="memberships")
+    user: Mapped[UserRecord] = relationship(back_populates="memberships")
 
 
 class ReconciliationRunRecord(Base):
