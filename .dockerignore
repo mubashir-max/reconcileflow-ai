@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+.env
+.env.docker
+.pytest_cache
+__pycache__
+*.py[cod]
+*.db
+output
+var
+data
+backend/tests

@@ -244,3 +244,44 @@ These capabilities belong to later roadmap milestones.
 ## Security
 
 Never commit credentials, `.env` files, production exports, generated reconciliation reports, or real personal and financial information. The `output/` directory is ignored because real generated reports may contain sensitive data; the synthetic source fixtures under `data/sample/` remain intentionally versioned.
+
+## Docker and PostgreSQL development
+
+Docker Compose runs the FastAPI service and PostgreSQL in reproducible containers. Docker Desktop must be installed and running; no Docker account or paid cloud service is required.
+
+Create the ignored local settings file and replace both occurrences of the example password with the same local-only password:
+
+```powershell
+Copy-Item .env.docker.example .env.docker
+```
+
+Start the environment and wait for both services to become healthy:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Alembic migrations run automatically before the API starts. Open `http://localhost:8000/docs` for the interactive API documentation or check readiness with:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/api/v1/health/ready
+```
+
+Useful lifecycle commands:
+
+```powershell
+# Follow service logs
+docker compose logs -f api
+
+# Stop containers while preserving database and upload volumes
+docker compose down
+
+# Rebuild after dependency or Dockerfile changes
+docker compose up --build -d
+
+# Permanently remove local containers and their stored data
+docker compose down --volumes
+```
+
+The final command intentionally deletes the local PostgreSQL and uploaded-file volumes. SQLite remains the default when no database URL is configured and continues to support the fast automated test suite.
