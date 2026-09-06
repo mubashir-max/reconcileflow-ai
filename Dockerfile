@@ -12,6 +12,7 @@ COPY backend ./backend
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 
 RUN pip install --no-cache-dir . \
+    && sed -i 's/\r$//' ./docker/entrypoint.sh \
     && chmod +x ./docker/entrypoint.sh \
     && mkdir -p /app/var/uploads \
     && chown -R reconcileflow:reconcileflow /app

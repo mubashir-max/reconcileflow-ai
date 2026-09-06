@@ -18,6 +18,7 @@ def test_container_starts_as_non_root_and_applies_migrations():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     entrypoint = (ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
     assert "USER reconcileflow" in dockerfile
+    assert "sed -i 's/\\r$//'" in dockerfile
     assert "alembic upgrade head" in entrypoint
     assert "exec uvicorn" in entrypoint
 
