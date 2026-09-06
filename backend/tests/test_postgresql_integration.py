@@ -42,6 +42,9 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "reconciliation_results",
             "reconciliation_runs",
             "source_files",
+            "organizations",
+            "organization_memberships",
+            "users",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
 
