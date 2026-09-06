@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,16 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
 
         async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test") as client:
             ready = await client.get("/api/v1/health/ready")
+            email = f"integration-{uuid.uuid4().hex}@example.com"
+            registered = await client.post("/api/v1/auth/register", json={
+                "email": email,
+                "password": "correct horse battery staple",
+                "organization_name": "Integration Test Organization",
+            })
+            logged_in = await client.post("/api/v1/auth/login", json={
+                "email": email.upper(),
+                "password": "correct horse battery staple",
+            })
             created = await client.post("/api/v1/reconciliation-runs", json={})
             run_id = created.json()["id"]
             for source_type, filename in (
@@ -68,6 +79,10 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             audit = await client.get(f"/api/v1/reconciliation-runs/{run_id}/audit-events")
 
         assert ready.status_code == 200
+        assert registered.status_code == 201
+        assert registered.json()["membership"]["role"] == "OWNER"
+        assert logged_in.status_code == 200
+        assert logged_in.json()["authenticated"] is True
         assert created.status_code == 201
         assert executed.status_code == 200
         assert executed.json()["status"] == "SUCCEEDED"
