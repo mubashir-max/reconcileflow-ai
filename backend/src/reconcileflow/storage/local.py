@@ -89,10 +89,16 @@ class LocalFileStorage:
             await upload.close()
 
     def delete(self, storage_key: str) -> None:
+        self.resolve(storage_key, require_exists=False).unlink(missing_ok=True)
+
+    def resolve(self, storage_key: str, *, require_exists: bool = True) -> Path:
+        """Resolve a server-generated key without allowing traversal."""
         candidate = self.directory / storage_key
         if candidate.name != storage_key or candidate.parent.resolve() != self.directory:
             raise ValueError("invalid storage key")
-        candidate.unlink(missing_ok=True)
+        if require_exists and not candidate.is_file():
+            raise FileNotFoundError("stored upload is unavailable")
+        return candidate
 
     @classmethod
     def _validated_filename(cls, supplied: str | None) -> tuple[str, str]:
