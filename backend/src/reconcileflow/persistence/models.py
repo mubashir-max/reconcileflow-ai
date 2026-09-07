@@ -194,6 +194,7 @@ class BackgroundJobRecord(Base):
         ),
         Index("ix_background_jobs_queue", "status", "scheduled_at", "retry_at", "created_at"),
         Index("ix_background_jobs_organization_status", "organization_id", "status"),
+        Index("ix_background_jobs_running_heartbeat", "status", "heartbeat_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -213,6 +214,8 @@ class BackgroundJobRecord(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancellation_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(String(200))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_code: Mapped[str | None] = mapped_column(String(100))
     failure_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

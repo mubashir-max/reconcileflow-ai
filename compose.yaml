@@ -44,6 +44,25 @@ services:
       retries: 5
       start_period: 15s
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "reconcileflow.worker"]
+    env_file:
+      - path: .env.docker.example
+      - path: .env.docker
+        required: false
+    environment:
+      RECONCILEFLOW_RUN_MIGRATIONS: "false"
+      RECONCILEFLOW_UPLOAD_DIRECTORY: /app/var/uploads
+    volumes:
+      - uploaded_files:/app/var/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   uploaded_files:

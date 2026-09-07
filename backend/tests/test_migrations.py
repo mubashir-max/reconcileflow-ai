@@ -125,12 +125,32 @@ def test_login_protection_database_can_add_and_remove_background_jobs(tmp_path: 
     assert {
         "organization_id", "run_id", "status", "progress_percentage",
         "attempt_count", "max_attempts", "scheduled_at", "retry_at",
+        "claimed_by", "heartbeat_at",
     } <= {column["name"] for column in inspector.get_columns("background_jobs")}
     engine.dispose()
 
     command.downgrade(config, "a4c8d2e71f50")
     engine = create_engine(database_url)
     assert "background_jobs" not in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_background_jobs_can_add_and_remove_worker_leases(tmp_path: Path) -> None:
+    database_path = tmp_path / "worker-leases-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+
+    command.upgrade(config, "d5e9a7c31b42")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("background_jobs")}
+    assert {"claimed_by", "heartbeat_at"} <= columns
+    engine.dispose()
+
+    command.downgrade(config, "d5e9a7c31b42")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("background_jobs")}
+    assert not {"claimed_by", "heartbeat_at"} & columns
     engine.dispose()
 
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:

@@ -36,8 +36,11 @@ def test_modified_or_wrongly_signed_token_is_rejected() -> None:
     access = _manager().issue_access(uuid.uuid4()).value
     with pytest.raises(TokenValidationError):
         _manager("x" * 32).decode_access(access)
+    header, payload, signature = access.split(".")
+    replacement = "A" if signature[0] != "A" else "B"
+    modified_access = ".".join((header, payload, replacement + signature[1:]))
     with pytest.raises(TokenValidationError):
-        _manager().decode_access(access[:-1] + ("a" if access[-1] != "a" else "b"))
+        _manager().decode_access(modified_access)
 
 
 def test_expired_token_is_rejected() -> None:

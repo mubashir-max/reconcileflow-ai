@@ -50,6 +50,10 @@ class APISettings(BaseSettings):
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
     login_max_failed_attempts: int = Field(default=5, ge=2, le=20)
     login_lockout_minutes: int = Field(default=15, ge=1, le=1440)
+    worker_id: str = Field(default="reconcileflow-worker", min_length=1, max_length=200)
+    worker_poll_interval_seconds: float = Field(default=2.0, ge=0.1, le=60.0)
+    worker_stale_timeout_seconds: int = Field(default=300, ge=30, le=86400)
+    worker_retry_delay_seconds: int = Field(default=30, ge=1, le=86400)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:
@@ -68,7 +72,7 @@ class APISettings(BaseSettings):
             raise ValueError("database_url must use postgresql+psycopg or sqlite+pysqlite")
         return SecretStr(url)
 
-    @field_validator("app_name", "app_version", "token_issuer", "token_audience")
+    @field_validator("app_name", "app_version", "token_issuer", "token_audience", "worker_id")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
