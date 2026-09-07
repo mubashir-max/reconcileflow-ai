@@ -90,3 +90,19 @@ def get_tenant_context(
 
 
 TenantContextDependency = Annotated[TenantContext, Depends(get_tenant_context)]
+
+RECONCILIATION_OPERATOR_ROLES = frozenset({"OWNER", "ADMIN", "ANALYST"})
+
+
+def get_reconciliation_operator(tenant: TenantContextDependency) -> TenantContext:
+    """Require a membership role allowed to change reconciliation data."""
+    if tenant.role not in RECONCILIATION_OPERATOR_ROLES:
+        raise APIError(
+            status_code=403,
+            code="INSUFFICIENT_ROLE",
+            message="Your organization role does not permit this operation.",
+        )
+    return tenant
+
+
+ReconciliationOperatorDependency = Annotated[TenantContext, Depends(get_reconciliation_operator)]

@@ -11,7 +11,7 @@ from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency
 from reconcileflow.storage import EmptyUploadError, UnsupportedUploadError, UploadTooLargeError
 
 from ..errors import APIError
-from ..auth_dependencies import TenantContextDependency, get_tenant_context
+from ..auth_dependencies import ReconciliationOperatorDependency, TenantContextDependency, get_tenant_context
 from ..file_schemas import SourceFileListResponse, SourceFileMetadataResponse, SourceFileType
 from ..schemas import ErrorResponse
 from ..storage_dependencies import FileStorageDependency
@@ -50,13 +50,14 @@ def _response(record) -> SourceFileMetadataResponse:
     response_model=SourceFileMetadataResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Upload a reconciliation source file",
+    description="Requires the OWNER, ADMIN, or ANALYST organization role.",
     responses=ERROR_RESPONSES,
 )
 async def upload_source_file(
     run_id: uuid.UUID,
     session: SessionDependency,
     storage: FileStorageDependency,
-    tenant: TenantContextDependency,
+    tenant: ReconciliationOperatorDependency,
     source_type: Annotated[SourceFileType, Form()],
     file: Annotated[UploadFile, File()],
 ) -> SourceFileMetadataResponse:

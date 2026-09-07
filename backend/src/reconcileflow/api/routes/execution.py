@@ -15,7 +15,7 @@ from reconcileflow.persistence import Page, PersistenceUnitOfWork, SessionDepend
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationEngine
 
 from ..errors import APIError
-from ..auth_dependencies import TenantContextDependency, get_tenant_context
+from ..auth_dependencies import ReconciliationOperatorDependency, TenantContextDependency, get_tenant_context
 from ..execution_schemas import AuditEventListResponse, AuditEventResponse, ExecutionResponse, ReconciliationResultStatus, ResultListResponse, ResultResponse
 from ..schemas import ErrorResponse
 from ..storage_dependencies import FileStorageDependency
@@ -37,8 +37,14 @@ def _audit(record) -> AuditEventResponse:
     return AuditEventResponse.model_validate(record, from_attributes=True)
 
 
-@router.post("/reconciliation-runs/{run_id}/execute", response_model=ExecutionResponse, responses=ERROR_RESPONSES, summary="Execute a pending reconciliation run")
-def execute_run(run_id: uuid.UUID, session: SessionDependency, storage: FileStorageDependency, tenant: TenantContextDependency) -> ExecutionResponse:
+@router.post(
+    "/reconciliation-runs/{run_id}/execute",
+    response_model=ExecutionResponse,
+    responses=ERROR_RESPONSES,
+    summary="Execute a pending reconciliation run",
+    description="Requires the OWNER, ADMIN, or ANALYST organization role.",
+)
+def execute_run(run_id: uuid.UUID, session: SessionDependency, storage: FileStorageDependency, tenant: ReconciliationOperatorDependency) -> ExecutionResponse:
     with PersistenceUnitOfWork(session) as work:
         run = work.runs.get(run_id, organization_id=tenant.organization_id, lock=True)
         if run.status != "PENDING":

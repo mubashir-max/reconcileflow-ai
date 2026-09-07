@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 
 from reconcileflow.api import APISettings, create_app
+from reconcileflow.persistence import OrganizationMembershipRecord
 
 
 DATABASE_URL = os.getenv("RECONCILEFLOW_TEST_POSTGRESQL_URL")
@@ -91,6 +92,18 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             executed = await client.post(f"/api/v1/reconciliation-runs/{run_id}/execute")
             results = await client.get(f"/api/v1/reconciliation-runs/{run_id}/results")
             audit = await client.get(f"/api/v1/reconciliation-runs/{run_id}/audit-events")
+            with app.state.database.session() as session:
+                membership = session.scalar(
+                    select(OrganizationMembershipRecord).where(
+                        OrganizationMembershipRecord.organization_id == uuid.UUID(
+                            client.headers["X-Organization-ID"]
+                        )
+                    )
+                )
+                membership.role = "VIEWER"
+                session.commit()
+            viewer_write = await client.post("/api/v1/reconciliation-runs", json={})
+            viewer_read = await client.get(f"/api/v1/reconciliation-runs/{run_id}")
 
         assert ready.status_code == 200
         assert registered.status_code == 201
@@ -107,5 +120,8 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert executed.json()["status"] == "SUCCEEDED"
         assert results.json()["total"] == 8
         assert audit.json()["items"][-1]["event_type"] == "RUN_SUCCEEDED"
+        assert viewer_write.status_code == 403
+        assert viewer_write.json()["error"]["code"] == "INSUFFICIENT_ROLE"
+        assert viewer_read.status_code == 200
     finally:
         app.state.database.dispose()
