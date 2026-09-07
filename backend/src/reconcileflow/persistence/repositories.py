@@ -23,6 +23,7 @@ from .models import (
     ReconciliationResultRecord,
     ReconciliationRunRecord,
     RefreshTokenRecord,
+    SecurityAuditEventRecord,
     RESULT_STATUSES,
     SourceFileRecord,
     UserRecord,
@@ -470,3 +471,45 @@ class AuditEventRepository:
     def count_for_run(self, run_id: uuid.UUID) -> int:
         statement = select(func.count()).select_from(AuditEventRecord).where(AuditEventRecord.run_id == run_id)
         return self._session.scalar(statement) or 0
+
+
+class SecurityAuditEventRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def append(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        event_type: str,
+        details: dict[str, Any] | None = None,
+    ) -> SecurityAuditEventRecord:
+        record = SecurityAuditEventRecord(
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+            event_type=event_type,
+            details=dict(details or {}),
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def list_for_organization(
+        self, organization_id: uuid.UUID, *, page: Page = Page()
+    ) -> list[SecurityAuditEventRecord]:
+        statement = (
+            select(SecurityAuditEventRecord)
+            .where(SecurityAuditEventRecord.organization_id == organization_id)
+            .order_by(SecurityAuditEventRecord.occurred_at.desc(), SecurityAuditEventRecord.id.desc())
+            .limit(page.limit)
+            .offset(page.offset)
+        )
+        return list(self._session.scalars(statement))
+
+    def count_for_organization(self, organization_id: uuid.UUID) -> int:
+        return self._session.scalar(
+            select(func.count()).select_from(SecurityAuditEventRecord).where(
+                SecurityAuditEventRecord.organization_id == organization_id
+            )
+        ) or 0

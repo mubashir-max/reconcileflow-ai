@@ -104,6 +104,12 @@ def register(
         membership = work.memberships.create(
             organization_id=organization.id, user_id=user.id, role="OWNER"
         )
+        work.security_audit_events.append(
+            organization_id=organization.id,
+            actor_user_id=user.id,
+            event_type="USER_REGISTERED",
+            details={"membership_role": "OWNER"},
+        )
     return RegistrationResponse(
         user=_user_response(user), membership=_membership_response(membership)
     )
@@ -143,6 +149,12 @@ def login(
             token_hash=tokens.hash_refresh_token(refresh.value),
             expires_at=refresh.expires_at,
         )
+        for membership in memberships:
+            work.security_audit_events.append(
+                organization_id=membership.organization_id,
+                actor_user_id=user.id,
+                event_type="USER_LOGGED_IN",
+            )
     return LoginResponse(
         authenticated=True,
         user=_user_response(user),
@@ -198,6 +210,16 @@ def refresh_tokens(
                     replacement_expires_at=replacement.expires_at,
                     at=now,
                 )
+                memberships = [
+                    item for item in work.memberships.list_for_user(user.id)
+                    if item.is_active and item.organization.is_active
+                ]
+                for membership in memberships:
+                    work.security_audit_events.append(
+                        organization_id=membership.organization_id,
+                        actor_user_id=user.id,
+                        event_type="REFRESH_TOKEN_ROTATED",
+                    )
     if reused:
         raise APIError(status_code=401, code="REFRESH_TOKEN_REUSED", message="The refresh token is invalid.")
     if invalid:
@@ -232,6 +254,16 @@ def logout(
             invalid = True
         else:
             work.refresh_tokens.revoke(record, at=_now())
+            memberships = [
+                item for item in work.memberships.list_for_user(claims.subject)
+                if item.is_active and item.organization.is_active
+            ]
+            for membership in memberships:
+                work.security_audit_events.append(
+                    organization_id=membership.organization_id,
+                    actor_user_id=claims.subject,
+                    event_type="USER_LOGGED_OUT",
+                )
     if invalid:
         raise APIError(status_code=401, code="INVALID_REFRESH_TOKEN", message="The refresh token is invalid.")
 

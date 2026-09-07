@@ -103,5 +103,12 @@ def update_organization(
     _ensure_selected(organization_id, manager.organization_id)
     with PersistenceUnitOfWork(session) as work:
         record = work.organizations.get(organization_id)
+        previous_name = record.name
         work.organizations.update_name(record, request.name)
+        work.security_audit_events.append(
+            organization_id=organization_id,
+            actor_user_id=manager.user_id,
+            event_type="ORGANIZATION_PROFILE_UPDATED",
+            details={"previous_name": previous_name, "new_name": record.name},
+        )
     return _profile(record, manager.role)
