@@ -76,6 +76,20 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             )
             client.headers["Authorization"] = f"Bearer {access_token}"
             client.headers["X-Organization-ID"] = registered.json()["membership"]["organization"]["id"]
+            secondary_email = f"member-{uuid.uuid4().hex}@example.com"
+            secondary = await client.post("/api/v1/auth/register", json={
+                "email": secondary_email,
+                "password": "correct horse battery staple",
+                "organization_name": "Secondary Integration Organization",
+            })
+            members_path = f"/api/v1/organizations/{client.headers['X-Organization-ID']}/members"
+            member_added = await client.post(
+                members_path, json={"email": secondary_email, "role": "VIEWER"}
+            )
+            member_updated = await client.patch(
+                f"{members_path}/{member_added.json()['id']}", json={"role": "ANALYST"}
+            )
+            member_removed = await client.delete(f"{members_path}/{member_added.json()['id']}")
             created = await client.post("/api/v1/reconciliation-runs", json={})
             run_id = created.json()["id"]
             for source_type, filename in (
@@ -115,6 +129,10 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert refreshed.status_code == 200
         assert refreshed.json()["refresh_token"] != refresh_token
         assert logged_out.status_code == 204
+        assert secondary.status_code == member_added.status_code == 201
+        assert member_updated.status_code == 200
+        assert member_updated.json()["role"] == "ANALYST"
+        assert member_removed.status_code == 204
         assert created.status_code == 201
         assert executed.status_code == 200
         assert executed.json()["status"] == "SUCCEEDED"
