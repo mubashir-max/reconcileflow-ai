@@ -48,6 +48,8 @@ class APISettings(BaseSettings):
     token_audience: str = Field(default="reconcileflow-clients", min_length=1, max_length=200)
     access_token_ttl_minutes: int = Field(default=15, ge=1, le=60)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
+    login_max_failed_attempts: int = Field(default=5, ge=2, le=20)
+    login_lockout_minutes: int = Field(default=15, ge=1, le=1440)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:

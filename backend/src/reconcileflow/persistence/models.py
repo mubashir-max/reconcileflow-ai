@@ -58,6 +58,7 @@ class UserRecord(Base):
         CheckConstraint("email = lower(trim(email))", name="normalized_email"),
         CheckConstraint("email LIKE '_%@_%'", name="email_has_at_sign"),
         CheckConstraint("length(trim(password_hash)) > 0", name="nonblank_password_hash"),
+        CheckConstraint("failed_login_attempts >= 0", name="nonnegative_failed_login_attempts"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -65,6 +66,8 @@ class UserRecord(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(150))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

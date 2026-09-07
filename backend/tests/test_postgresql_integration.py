@@ -60,6 +60,10 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                 "password": "correct horse battery staple",
                 "organization_name": "Integration Test Organization",
             })
+            failed_login = await client.post("/api/v1/auth/login", json={
+                "email": email,
+                "password": "incorrect password",
+            })
             logged_in = await client.post("/api/v1/auth/login", json={
                 "email": email.upper(),
                 "password": "correct horse battery staple",
@@ -147,6 +151,8 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert ready.status_code == 200
         assert registered.status_code == 201
         assert registered.json()["membership"]["role"] == "OWNER"
+        assert failed_login.status_code == 401
+        assert failed_login.json()["error"]["code"] == "INVALID_CREDENTIALS"
         assert logged_in.status_code == 200
         assert logged_in.json()["authenticated"] is True
         assert current_user.status_code == 200
@@ -164,7 +170,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert organization_updated.json()["slug"] == organization_profile.json()["slug"]
         assert security_audit.status_code == 200
         assert {item["event_type"] for item in security_audit.json()["items"]} >= {
-            "USER_REGISTERED", "USER_LOGGED_IN", "ORGANIZATION_PROFILE_UPDATED"
+            "USER_REGISTERED", "LOGIN_FAILED", "USER_LOGGED_IN", "ORGANIZATION_PROFILE_UPDATED"
         }
         assert changed_password.status_code == 204
         assert revoked_refresh.status_code == 401
