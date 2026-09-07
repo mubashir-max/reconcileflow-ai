@@ -1,5 +1,8 @@
 FROM python:3.14-slim
 
+LABEL org.opencontainers.image.title="ReconcileFlow AI" \
+      org.opencontainers.image.version="0.3.0"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

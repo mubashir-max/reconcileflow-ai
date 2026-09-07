@@ -1,6 +1,6 @@
 # ReconcileFlow AI
 
-ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.2 exposes the deterministic, explainable reconciliation core through a persistent FastAPI service backed by PostgreSQL.
+ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.3 adds secure authentication and organization-based multi-tenancy to the persistent FastAPI and PostgreSQL platform.
 
 All repository fixtures are synthetic and anonymized. They contain no real customers, accounts, cards, or payments.
 
@@ -27,6 +27,18 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Result filtering by reconciliation status and review requirement
 - Docker Compose environment with health checks and durable local volumes
 - Automated testing against SQLite and PostgreSQL
+
+## v0.3 capabilities
+
+- Secure password registration and Argon2 password hashing
+- Signed access tokens and rotating, revocable refresh-token sessions
+- Password changes and account-wide session revocation
+- Persistent failed-login tracking and configurable temporary lockouts
+- Organization discovery, profile management, and membership administration
+- OWNER, ADMIN, ANALYST, and VIEWER role-based permissions
+- Strict tenant isolation for runs, files, results, and audit records
+- Append-only security audit events without passwords or token values
+- Automated authentication and multi-tenant testing against SQLite and PostgreSQL
 
 ## Architecture
 
@@ -251,12 +263,24 @@ Start the local service with Docker Compose:
 docker compose up --build -d
 ```
 
-Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.2 endpoints are:
+Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.3 endpoints are:
 
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/v1/health/live` | Confirm the API process is running. |
 | `GET /api/v1/health/ready` | Confirm the API can reach its database. |
+| `POST /api/v1/auth/register` | Register a user and initial organization. |
+| `POST /api/v1/auth/login` | Authenticate and receive access and refresh tokens. |
+| `POST /api/v1/auth/refresh` | Rotate a refresh token and receive a new token pair. |
+| `POST /api/v1/auth/logout` | Revoke one refresh-token session. |
+| `POST /api/v1/auth/change-password` | Change the password and revoke all refresh sessions. |
+| `DELETE /api/v1/auth/sessions` | Sign out every refresh-token session. |
+| `GET /api/v1/auth/me` | Retrieve the authenticated identity and memberships. |
+| `GET /api/v1/organizations` | List organizations available to the user. |
+| `GET/PATCH /api/v1/organizations/{organization_id}` | View or rename an organization. |
+| `GET/POST /api/v1/organizations/{organization_id}/members` | List or add members. |
+| `PATCH/DELETE /api/v1/organizations/{organization_id}/members/{membership_id}` | Change a role or deactivate membership. |
+| `GET /api/v1/organizations/{organization_id}/security-audit-events` | List security events as OWNER or ADMIN. |
 | `POST /api/v1/reconciliation-runs` | Create a pending run and configuration snapshot. |
 | `GET /api/v1/reconciliation-runs` | List runs with pagination and status filtering. |
 | `GET /api/v1/reconciliation-runs/{run_id}` | Retrieve one run and its status. |
@@ -272,12 +296,15 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 
 The easiest way to learn the workflow is through `/docs`: open each endpoint, select **Try it out**, and execute these steps in order:
 
-1. Create a reconciliation run and copy its `id`.
-2. Upload `data/sample/bank_transactions.csv` as `BANK_TRANSACTIONS`.
-3. Upload `data/sample/erp_invoices.csv` as `ERP_INVOICES`.
-4. Optionally upload `data/sample/gateway_settlements.csv` as `GATEWAY_SETTLEMENTS`.
-5. Execute the run using its ID.
-6. Retrieve its results and audit events.
+1. Register a user and copy the returned organization ID.
+2. Log in and copy the access and refresh tokens.
+3. Authorize requests with `Authorization: Bearer <access-token>`.
+4. Select the workspace with `X-Organization-ID: <organization-id>`.
+5. Create a reconciliation run and copy its `id`.
+6. Upload `data/sample/bank_transactions.csv` as `BANK_TRANSACTIONS`.
+7. Upload `data/sample/erp_invoices.csv` as `ERP_INVOICES`.
+8. Optionally upload `data/sample/gateway_settlements.csv` as `GATEWAY_SETTLEMENTS`.
+9. Execute the run, then retrieve its results and audit events.
 
 Bank and ERP inputs are required. One file of each source type is allowed per pending run. A succeeded or failed run cannot execute again. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
 
@@ -292,11 +319,23 @@ alembic current
 
 Create new migration revisions only when the SQLAlchemy persistence schema changes.
 
+## Authentication and tenant security
+
+Access tokens authorize API calls; refresh tokens are rotated and stored only as hashes. Password changes and the sign-out-everywhere operation revoke every refresh-token session. Existing access tokens remain usable only until their short configured expiration.
+
+Every protected request selects an organization with `X-Organization-ID`. Membership roles are `OWNER`, `ADMIN`, `ANALYST`, and `VIEWER`; write and administration permissions narrow by role. Cross-organization records are deliberately returned as inaccessible.
+
+After five consecutive failed passwords by default, the account is locked for 15 minutes. Configure this with `RECONCILEFLOW_LOGIN_MAX_FAILED_ATTEMPTS` and `RECONCILEFLOW_LOGIN_LOCKOUT_MINUTES`. Unknown, incorrect, disabled, and locked accounts receive the same public credential error.
+
+Security audit events record successful authentication, token rotation and revocation, password changes, lockouts, profile updates, and membership changes. They never contain passwords or raw access/refresh tokens and are visible only to OWNER and ADMIN members of the selected organization.
+
 ## Current limitations
 
-Version 0.2 is a persistent backend foundation, not yet a deployed multi-user SaaS product. It does not include:
+Version 0.3 is a secure multi-tenant backend foundation, not yet a deployed end-user SaaS product. It does not include:
 
-- Authentication, authorization, or tenant isolation
+- Email verification or password-reset email delivery
+- Microsoft, Google, or other external OAuth login
+- CAPTCHA or distributed rate limiting across multiple API instances
 - Background job queues or asynchronous reconciliation execution
 - Cloud object storage
 - Web, Android, or iOS interfaces
