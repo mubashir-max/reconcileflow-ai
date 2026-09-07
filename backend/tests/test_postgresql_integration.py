@@ -146,6 +146,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                     )
                 with PersistenceUnitOfWork(session) as work:
                     claimed_job = work.background_jobs.claim_next(
+                        worker_id="postgresql-integration-worker",
                         organization_id=uuid.UUID(organization_id)
                     )
                 membership = session.scalar(
@@ -159,6 +160,30 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                 session.commit()
             viewer_write = await client.post("/api/v1/reconciliation-runs", json={})
             viewer_read = await client.get(f"/api/v1/reconciliation-runs/{run_id}")
+
+        with app.state.database.session() as session:
+            with PersistenceUnitOfWork(session) as work:
+                concurrent_run = work.runs.create(organization_id=uuid.UUID(organization_id))
+                concurrent_job = work.background_jobs.create(
+                    organization_id=uuid.UUID(organization_id),
+                    run_id=concurrent_run.id,
+                )
+        with (
+            app.state.database.session() as first_worker_session,
+            app.state.database.session() as second_worker_session,
+        ):
+            first_claim = PersistenceUnitOfWork(first_worker_session).background_jobs.claim_next(
+                worker_id="concurrency-worker-one",
+                organization_id=uuid.UUID(organization_id),
+            )
+            second_claim = PersistenceUnitOfWork(second_worker_session).background_jobs.claim_next(
+                worker_id="concurrency-worker-two",
+                organization_id=uuid.UUID(organization_id),
+            )
+            assert first_claim.id == concurrent_job.id
+            assert second_claim is None
+            first_worker_session.rollback()
+            second_worker_session.rollback()
 
         assert ready.status_code == 200
         assert registered.status_code == 201

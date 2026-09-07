@@ -1,0 +1,48 @@
+"""Run the standalone ReconcileFlow background worker."""
+
+from __future__ import annotations
+
+import logging
+import signal
+import threading
+
+from reconcileflow.api.config import APISettings
+from reconcileflow.persistence import Database
+
+from .service import BackgroundWorker, WorkerContext, WorkerJob
+
+
+def _pending_processor(_job: WorkerJob, _context: WorkerContext) -> None:
+    raise RuntimeError("reconciliation processor is not configured")
+
+
+def main() -> None:
+    settings = APISettings()
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    database = Database(settings)
+    stop_event = threading.Event()
+
+    def request_shutdown(_signum, _frame) -> None:
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, request_shutdown)
+    signal.signal(signal.SIGTERM, request_shutdown)
+    worker = BackgroundWorker(
+        session_provider=database.session,
+        processor=_pending_processor,
+        worker_id=settings.worker_id,
+        poll_interval_seconds=settings.worker_poll_interval_seconds,
+        stale_timeout_seconds=settings.worker_stale_timeout_seconds,
+        retry_delay_seconds=settings.worker_retry_delay_seconds,
+    )
+    try:
+        worker.run_forever(stop_event)
+    finally:
+        database.dispose()
+
+
+if __name__ == "__main__":
+    main()

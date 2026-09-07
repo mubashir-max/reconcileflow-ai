@@ -444,9 +444,13 @@ class BackgroundJobRepository:
     def claim_next(
         self,
         *,
+        worker_id: str,
         at: datetime | None = None,
         organization_id: uuid.UUID | None = None,
     ) -> BackgroundJobRecord | None:
+        worker_id = worker_id.strip()
+        if not worker_id or len(worker_id) > 200:
+            raise ValueError("worker_id must contain between 1 and 200 characters")
         claimed_at = _utc(at or datetime.now(UTC))
         statement = select(BackgroundJobRecord).where(
             BackgroundJobRecord.status == BackgroundJobStatus.QUEUED.value,
@@ -472,12 +476,68 @@ class BackgroundJobRepository:
         record.status = BackgroundJobStatus.RUNNING.value
         record.attempt_count += 1
         record.started_at = claimed_at
+        record.claimed_by = worker_id
+        record.heartbeat_at = claimed_at
         record.completed_at = None
         record.retry_at = None
         record.failure_code = None
         record.failure_message = None
         self._session.flush()
         return record
+
+    def heartbeat(
+        self,
+        job_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+        worker_id: str,
+        at: datetime | None = None,
+    ) -> BackgroundJobRecord:
+        record = self.get(job_id, organization_id=organization_id, lock=True)
+        if record.status not in {
+            BackgroundJobStatus.RUNNING.value,
+            BackgroundJobStatus.CANCEL_REQUESTED.value,
+        } or record.claimed_by != worker_id:
+            raise InvalidStatusTransitionError("background job lease is not owned by this worker")
+        record.heartbeat_at = _utc(at or datetime.now(UTC))
+        self._session.flush()
+        return record
+
+    def recover_stale(
+        self,
+        *,
+        stale_before: datetime,
+        at: datetime | None = None,
+    ) -> int:
+        recovered_at = _utc(at or datetime.now(UTC))
+        cutoff = _utc(stale_before)
+        statement = select(BackgroundJobRecord).where(
+            BackgroundJobRecord.status.in_((
+                BackgroundJobStatus.RUNNING.value,
+                BackgroundJobStatus.CANCEL_REQUESTED.value,
+            )),
+            BackgroundJobRecord.heartbeat_at <= cutoff,
+        ).with_for_update()
+        records = list(self._session.scalars(statement))
+        for record in records:
+            if record.status == BackgroundJobStatus.CANCEL_REQUESTED.value:
+                record.status = BackgroundJobStatus.CANCELLED.value
+                record.completed_at = recovered_at
+                record.status_message = "Cancelled after worker interruption"
+            elif record.attempt_count < record.max_attempts:
+                record.status = BackgroundJobStatus.QUEUED.value
+                record.retry_at = recovered_at
+                record.started_at = None
+                record.status_message = "Recovered after worker interruption"
+            else:
+                record.status = BackgroundJobStatus.FAILED.value
+                record.completed_at = recovered_at
+                record.failure_code = "WORKER_INTERRUPTED"
+                record.failure_message = "Background processing was interrupted."
+            record.claimed_by = None
+            record.heartbeat_at = None
+        self._session.flush()
+        return len(records)
 
     def update_progress(
         self,
@@ -556,6 +616,8 @@ class BackgroundJobRepository:
             record.status = target
             record.completed_at = completed_at
             record.progress_percentage = 100 if target == BackgroundJobStatus.SUCCEEDED.value else record.progress_percentage
+        record.claimed_by = None
+        record.heartbeat_at = None
         if target == BackgroundJobStatus.FAILED.value:
             record.failure_code = failure_code.strip()[:100] if failure_code else None
             record.failure_message = failure_message.strip()[:2000] if failure_message else None

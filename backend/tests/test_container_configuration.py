@@ -12,6 +12,9 @@ def test_compose_defines_database_api_healthchecks_and_volumes():
     assert "/api/v1/health/ready" in compose
     assert "postgres_data:/var/lib/postgresql/data" in compose
     assert "uploaded_files:/app/var/uploads" in compose
+    assert "worker:" in compose
+    assert '["python", "-m", "reconcileflow.worker"]' in compose
+    assert 'RECONCILEFLOW_RUN_MIGRATIONS: "false"' in compose
 
 
 def test_container_starts_as_non_root_and_applies_migrations():
@@ -20,7 +23,8 @@ def test_container_starts_as_non_root_and_applies_migrations():
     assert "USER reconcileflow" in dockerfile
     assert "sed -i 's/\\r$//'" in dockerfile
     assert "alembic upgrade head" in entrypoint
-    assert "exec uvicorn" in entrypoint
+    assert "set -- uvicorn" in entrypoint
+    assert 'exec "$@"' in entrypoint
     assert 'org.opencontainers.image.version="0.3.0"' in dockerfile
 
 

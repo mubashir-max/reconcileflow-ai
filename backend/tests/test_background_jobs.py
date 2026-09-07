@@ -102,11 +102,12 @@ def test_claim_next_obeys_schedule_and_updates_attempt_state(session: Session) -
     ready_job = _create_job(session, scheduled_at=now - timedelta(seconds=1))
 
     with PersistenceUnitOfWork(session) as work:
-        claimed = work.background_jobs.claim_next(at=now)
+        claimed = work.background_jobs.claim_next(worker_id="test-worker", at=now)
         assert claimed.id == ready_job.id
         assert claimed.status == BackgroundJobStatus.RUNNING
         assert claimed.attempt_count == 1
         assert claimed.started_at == now
+        assert claimed.claimed_by == "test-worker"
 
     assert PersistenceUnitOfWork(session).background_jobs.get(
         future_job.id, organization_id=ORGANIZATION_ID
@@ -117,7 +118,7 @@ def test_progress_success_and_cancellation_lifecycle(session: Session) -> None:
     now = datetime.now(UTC)
     success_job = _create_job(session, scheduled_at=now)
     with PersistenceUnitOfWork(session) as work:
-        work.background_jobs.claim_next(at=now)
+        work.background_jobs.claim_next(worker_id="test-worker", at=now)
         work.background_jobs.update_progress(
             success_job.id,
             organization_id=ORGANIZATION_ID,
@@ -135,7 +136,7 @@ def test_progress_success_and_cancellation_lifecycle(session: Session) -> None:
 
     cancelled_job = _create_job(session, scheduled_at=now)
     with PersistenceUnitOfWork(session) as work:
-        work.background_jobs.claim_next(at=now)
+        work.background_jobs.claim_next(worker_id="test-worker", at=now)
         requested = work.background_jobs.request_cancellation(
             cancelled_job.id, organization_id=ORGANIZATION_ID, at=now
         )
@@ -153,7 +154,7 @@ def test_failed_job_can_be_safely_retried_until_attempt_limit(session: Session) 
     now = datetime.now(UTC)
     job = _create_job(session, scheduled_at=now, max_attempts=2)
     with PersistenceUnitOfWork(session) as work:
-        work.background_jobs.claim_next(at=now)
+        work.background_jobs.claim_next(worker_id="test-worker", at=now)
         retrying = work.background_jobs.complete(
             job.id,
             BackgroundJobStatus.FAILED,
@@ -166,7 +167,7 @@ def test_failed_job_can_be_safely_retried_until_attempt_limit(session: Session) 
         assert retrying.failure_message == "Input could not be processed."
 
     with PersistenceUnitOfWork(session) as work:
-        work.background_jobs.claim_next(at=now + timedelta(minutes=1))
+        work.background_jobs.claim_next(worker_id="test-worker", at=now + timedelta(minutes=1))
         failed = work.background_jobs.complete(
             job.id,
             BackgroundJobStatus.FAILED,
