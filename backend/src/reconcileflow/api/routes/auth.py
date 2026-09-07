@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency
 
@@ -124,38 +124,76 @@ def register(
 )
 def login(
     request: LoginRequest,
+    http_request: Request,
     session: SessionDependency,
     passwords: PasswordManagerDependency,
     tokens: TokenManagerDependency,
 ) -> LoginResponse:
+    now = _now()
+    settings = http_request.app.state.settings
+    invalid = False
     work = PersistenceUnitOfWork(session)
     with work:
-        user = work.users.get_by_email(request.email)
+        user = work.users.get_by_email(request.email, lock=True)
         if user is None:
             passwords.verify_dummy(request.password)
-            raise APIError(status_code=401, code="INVALID_CREDENTIALS", message="The email or password is incorrect.")
-        if not passwords.verify(request.password, user.password_hash) or not user.is_active:
-            raise APIError(status_code=401, code="INVALID_CREDENTIALS", message="The email or password is incorrect.")
-        memberships = [
-            membership
-            for membership in work.memberships.list_for_user(user.id)
-            if membership.is_active and membership.organization.is_active
-        ]
-        access = tokens.issue_access(user.id)
-        refresh = tokens.issue_refresh(user.id)
-        work.refresh_tokens.create(
-            token_id=refresh.token_id,
-            user_id=user.id,
-            family_id=uuid.uuid4(),
-            token_hash=tokens.hash_refresh_token(refresh.value),
-            expires_at=refresh.expires_at,
-        )
-        for membership in memberships:
-            work.security_audit_events.append(
-                organization_id=membership.organization_id,
-                actor_user_id=user.id,
-                event_type="USER_LOGGED_IN",
-            )
+            invalid = True
+        else:
+            password_valid = passwords.verify(request.password, user.password_hash)
+            lock_is_active = user.locked_until is not None and _database_utc(user.locked_until) > now
+            memberships = _active_memberships(work, user.id)
+            if lock_is_active or not user.is_active:
+                invalid = True
+                if lock_is_active:
+                    for membership in memberships:
+                        work.security_audit_events.append(
+                            organization_id=membership.organization_id,
+                            actor_user_id=user.id,
+                            event_type="LOGIN_FAILED",
+                            details={"reason": "ACCOUNT_LOCKED"},
+                        )
+            elif not password_valid:
+                if user.locked_until is not None:
+                    work.users.reset_login_protection(user)
+                newly_locked = work.users.record_failed_login(
+                    user,
+                    threshold=settings.login_max_failed_attempts,
+                    locked_until=now + timedelta(minutes=settings.login_lockout_minutes),
+                )
+                for membership in memberships:
+                    work.security_audit_events.append(
+                        organization_id=membership.organization_id,
+                        actor_user_id=user.id,
+                        event_type="LOGIN_FAILED",
+                        details={"failed_attempts": user.failed_login_attempts},
+                    )
+                    if newly_locked:
+                        work.security_audit_events.append(
+                            organization_id=membership.organization_id,
+                            actor_user_id=user.id,
+                            event_type="ACCOUNT_TEMPORARILY_LOCKED",
+                            details={"lockout_minutes": settings.login_lockout_minutes},
+                        )
+                invalid = True
+            else:
+                work.users.reset_login_protection(user)
+                access = tokens.issue_access(user.id)
+                refresh = tokens.issue_refresh(user.id)
+                work.refresh_tokens.create(
+                    token_id=refresh.token_id,
+                    user_id=user.id,
+                    family_id=uuid.uuid4(),
+                    token_hash=tokens.hash_refresh_token(refresh.value),
+                    expires_at=refresh.expires_at,
+                )
+                for membership in memberships:
+                    work.security_audit_events.append(
+                        organization_id=membership.organization_id,
+                        actor_user_id=user.id,
+                        event_type="USER_LOGGED_IN",
+                    )
+    if invalid:
+        raise APIError(status_code=401, code="INVALID_CREDENTIALS", message="The email or password is incorrect.")
     return LoginResponse(
         authenticated=True,
         user=_user_response(user),

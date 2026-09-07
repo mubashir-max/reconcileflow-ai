@@ -93,6 +93,24 @@ def test_token_database_can_add_and_remove_security_audit_events(tmp_path: Path)
     engine.dispose()
 
 
+def test_security_audit_database_can_add_and_remove_login_protection(tmp_path: Path) -> None:
+    database_path = tmp_path / "login-protection-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+
+    command.upgrade(config, "f3a7b91c4d20")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    assert {"failed_login_attempts", "locked_until"} <= columns
+    engine.dispose()
+
+    command.downgrade(config, "f3a7b91c4d20")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    assert not {"failed_login_attempts", "locked_until"} & columns
+    engine.dispose()
+
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:
     database_path = tmp_path / "tenant-upgrade.db"
     database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"

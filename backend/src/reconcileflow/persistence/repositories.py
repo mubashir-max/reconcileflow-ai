@@ -89,8 +89,11 @@ class UserRepository:
         self._session.flush()
         return record
 
-    def get_by_email(self, email: str) -> UserRecord | None:
-        return self._session.scalar(select(UserRecord).where(UserRecord.email == email))
+    def get_by_email(self, email: str, *, lock: bool = False) -> UserRecord | None:
+        statement = select(UserRecord).where(UserRecord.email == email)
+        if lock:
+            statement = statement.with_for_update()
+        return self._session.scalar(statement)
 
     def get(self, user_id: uuid.UUID, *, lock: bool = False) -> UserRecord | None:
         statement = select(UserRecord).where(UserRecord.id == user_id)
@@ -105,6 +108,22 @@ class UserRepository:
         record.password_hash = password_hash
         self._session.flush()
         return record
+
+    def record_failed_login(
+        self, record: UserRecord, *, threshold: int, locked_until: datetime
+    ) -> bool:
+        record.failed_login_attempts += 1
+        newly_locked = record.failed_login_attempts >= threshold
+        if newly_locked:
+            record.locked_until = _utc(locked_until)
+        self._session.flush()
+        return newly_locked
+
+    def reset_login_protection(self, record: UserRecord) -> None:
+        if record.failed_login_attempts or record.locked_until is not None:
+            record.failed_login_attempts = 0
+            record.locked_until = None
+            self._session.flush()
 
 
 class OrganizationMembershipRepository:

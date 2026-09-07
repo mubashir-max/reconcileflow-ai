@@ -63,6 +63,16 @@ def test_token_settings_are_secret_and_validated():
     assert settings.refresh_token_ttl_days == 7
 
 
+def test_login_protection_settings_are_validated():
+    settings = APISettings(login_max_failed_attempts=3, login_lockout_minutes=10, _env_file=None)
+    assert settings.login_max_failed_attempts == 3
+    assert settings.login_lockout_minutes == 10
+    with pytest.raises(ValidationError):
+        APISettings(login_max_failed_attempts=1, _env_file=None)
+    with pytest.raises(ValidationError):
+        APISettings(login_lockout_minutes=0, _env_file=None)
+
+
 def test_short_token_secret_is_rejected():
     with pytest.raises(ValidationError, match="token_signing_secret"):
         APISettings(token_signing_secret="too-short", _env_file=None)
