@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from reconcileflow.persistence import AuditEventRecord, Base, ConfigurationSnapshotRecord, OrganizationRecord, ReconciliationResultRecord, ReconciliationRunRecord, SourceFileRecord
+from reconcileflow.persistence import AuditEventRecord, BackgroundJobRecord, Base, ConfigurationSnapshotRecord, OrganizationRecord, ReconciliationResultRecord, ReconciliationRunRecord, SourceFileRecord
 
 
 @pytest.fixture
@@ -26,6 +26,7 @@ def test_metadata_defines_complete_schema() -> None:
         "audit_events", "configuration_snapshots", "reconciliation_results",
         "reconciliation_runs", "source_files", "organizations",
         "organization_memberships", "users", "refresh_tokens", "security_audit_events",
+        "background_jobs",
     }
 
 
@@ -36,6 +37,7 @@ def test_records_and_relationships_persist(session: Session) -> None:
     run.configuration = ConfigurationSnapshotRecord(amount_tolerance=Decimal("0.50"), date_tolerance_days=2, settings={"priority": "exact"})
     run.results.append(ReconciliationResultRecord(external_result_id="RESULT-1", status="EXACT_MATCH", rule="exact", bank_source_record_ids=["BANK-1"], erp_invoice_ids=["INV-1"], explanation="Reference, currency, and amount matched."))
     run.audit_events.append(AuditEventRecord(sequence_number=1, event_type="RUN_STARTED", occurred_at=datetime.now(UTC), details={"source": "api"}))
+    run.background_job = BackgroundJobRecord(organization=organization, max_attempts=3)
     session.add(run)
     session.commit()
 
@@ -45,6 +47,7 @@ def test_records_and_relationships_persist(session: Session) -> None:
     assert loaded.source_files[0].original_filename == "bank.csv"
     assert loaded.results[0].bank_source_record_ids == ["BANK-1"]
     assert loaded.audit_events[0].details == {"source": "api"}
+    assert loaded.background_job.status == "QUEUED"
 
 
 def test_database_constraints_reject_invalid_status(session: Session) -> None:

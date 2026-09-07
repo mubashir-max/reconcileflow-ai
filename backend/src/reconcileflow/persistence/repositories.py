@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from reconcileflow.audit import AuditEvent
@@ -17,6 +17,8 @@ from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationRes
 from .errors import InvalidStatusTransitionError, PersistenceConflictError, RecordNotFoundError
 from .models import (
     AuditEventRecord,
+    BackgroundJobRecord,
+    BackgroundJobStatus,
     ConfigurationSnapshotRecord,
     OrganizationMembershipRecord,
     OrganizationRecord,
@@ -364,6 +366,208 @@ class ReconciliationRunRepository:
         self._session.flush()
         return record
 
+
+class BackgroundJobRepository:
+    """Tenant-scoped queue operations for reconciliation workers."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        run_id: uuid.UUID,
+        scheduled_at: datetime | None = None,
+        max_attempts: int = 3,
+    ) -> BackgroundJobRecord:
+        if isinstance(max_attempts, bool) or max_attempts < 1:
+            raise ValueError("max_attempts must be a positive integer")
+        run_exists = self._session.scalar(
+            select(ReconciliationRunRecord.id).where(
+                ReconciliationRunRecord.id == run_id,
+                ReconciliationRunRecord.organization_id == organization_id,
+            )
+        )
+        if run_exists is None:
+            raise RecordNotFoundError(f"reconciliation run {run_id} was not found")
+        if self._session.scalar(
+            select(BackgroundJobRecord.id).where(BackgroundJobRecord.run_id == run_id)
+        ) is not None:
+            raise PersistenceConflictError(f"run {run_id} already has a background job")
+        record = BackgroundJobRecord(
+            organization_id=organization_id,
+            run_id=run_id,
+            scheduled_at=_utc(scheduled_at or datetime.now(UTC)),
+            max_attempts=max_attempts,
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get(
+        self,
+        job_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+        lock: bool = False,
+    ) -> BackgroundJobRecord:
+        statement = select(BackgroundJobRecord).where(
+            BackgroundJobRecord.id == job_id,
+            BackgroundJobRecord.organization_id == organization_id,
+        )
+        if lock:
+            statement = statement.with_for_update()
+        record = self._session.scalar(statement)
+        if record is None:
+            raise RecordNotFoundError(f"background job {job_id} was not found")
+        return record
+
+    def list(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        status: BackgroundJobStatus | str | None = None,
+        page: Page = Page(),
+    ) -> list[BackgroundJobRecord]:
+        statement = select(BackgroundJobRecord).where(
+            BackgroundJobRecord.organization_id == organization_id
+        )
+        if status is not None:
+            normalized_status = self._status_value(status)
+            statement = statement.where(BackgroundJobRecord.status == normalized_status)
+        statement = statement.order_by(
+            BackgroundJobRecord.created_at.desc(), BackgroundJobRecord.id
+        ).limit(page.limit).offset(page.offset)
+        return list(self._session.scalars(statement))
+
+    def claim_next(
+        self,
+        *,
+        at: datetime | None = None,
+        organization_id: uuid.UUID | None = None,
+    ) -> BackgroundJobRecord | None:
+        claimed_at = _utc(at or datetime.now(UTC))
+        statement = select(BackgroundJobRecord).where(
+            BackgroundJobRecord.status == BackgroundJobStatus.QUEUED.value,
+            BackgroundJobRecord.scheduled_at <= claimed_at,
+            or_(BackgroundJobRecord.retry_at.is_(None), BackgroundJobRecord.retry_at <= claimed_at),
+            BackgroundJobRecord.attempt_count < BackgroundJobRecord.max_attempts,
+        )
+        if organization_id is not None:
+            statement = statement.where(BackgroundJobRecord.organization_id == organization_id)
+        statement = statement.order_by(
+            BackgroundJobRecord.scheduled_at,
+            BackgroundJobRecord.retry_at,
+            BackgroundJobRecord.created_at,
+            BackgroundJobRecord.id,
+        ).limit(1)
+        if self._session.bind is not None and self._session.bind.dialect.name == "postgresql":
+            statement = statement.with_for_update(skip_locked=True)
+        else:
+            statement = statement.with_for_update()
+        record = self._session.scalar(statement)
+        if record is None:
+            return None
+        record.status = BackgroundJobStatus.RUNNING.value
+        record.attempt_count += 1
+        record.started_at = claimed_at
+        record.completed_at = None
+        record.retry_at = None
+        record.failure_code = None
+        record.failure_message = None
+        self._session.flush()
+        return record
+
+    def update_progress(
+        self,
+        job_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+        progress_percentage: int,
+        status_message: str | None = None,
+    ) -> BackgroundJobRecord:
+        if isinstance(progress_percentage, bool) or not 0 <= progress_percentage <= 100:
+            raise ValueError("progress_percentage must be between 0 and 100")
+        record = self.get(job_id, organization_id=organization_id, lock=True)
+        if record.status not in {
+            BackgroundJobStatus.RUNNING.value,
+            BackgroundJobStatus.CANCEL_REQUESTED.value,
+        }:
+            raise InvalidStatusTransitionError(
+                f"cannot update progress for a {record.status} background job"
+            )
+        record.progress_percentage = progress_percentage
+        record.status_message = status_message.strip()[:500] if status_message else None
+        self._session.flush()
+        return record
+
+    def request_cancellation(
+        self, job_id: uuid.UUID, *, organization_id: uuid.UUID, at: datetime | None = None
+    ) -> BackgroundJobRecord:
+        record = self.get(job_id, organization_id=organization_id, lock=True)
+        if record.status not in {
+            BackgroundJobStatus.QUEUED.value,
+            BackgroundJobStatus.RUNNING.value,
+        }:
+            raise InvalidStatusTransitionError(
+                f"cannot cancel a {record.status} background job"
+            )
+        record.status = BackgroundJobStatus.CANCEL_REQUESTED.value
+        record.cancellation_requested_at = _utc(at or datetime.now(UTC))
+        self._session.flush()
+        return record
+
+    def complete(
+        self,
+        job_id: uuid.UUID,
+        status: BackgroundJobStatus | str,
+        *,
+        organization_id: uuid.UUID,
+        at: datetime | None = None,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+        retry_at: datetime | None = None,
+    ) -> BackgroundJobRecord:
+        record = self.get(job_id, organization_id=organization_id, lock=True)
+        target = self._status_value(status)
+        allowed = {
+            BackgroundJobStatus.RUNNING.value: {
+                BackgroundJobStatus.SUCCEEDED.value,
+                BackgroundJobStatus.FAILED.value,
+            },
+            BackgroundJobStatus.CANCEL_REQUESTED.value: {
+                BackgroundJobStatus.CANCELLED.value,
+                BackgroundJobStatus.FAILED.value,
+            },
+        }
+        if target not in allowed.get(record.status, set()):
+            raise InvalidStatusTransitionError(
+                f"cannot transition background job from {record.status} to {target}"
+            )
+        completed_at = _utc(at or datetime.now(UTC))
+        if target == BackgroundJobStatus.FAILED.value and retry_at is not None:
+            if record.attempt_count >= record.max_attempts:
+                raise InvalidStatusTransitionError("background job has exhausted its attempts")
+            record.status = BackgroundJobStatus.QUEUED.value
+            record.retry_at = _utc(retry_at)
+            record.status_message = "Retry scheduled"
+        else:
+            record.status = target
+            record.completed_at = completed_at
+            record.progress_percentage = 100 if target == BackgroundJobStatus.SUCCEEDED.value else record.progress_percentage
+        if target == BackgroundJobStatus.FAILED.value:
+            record.failure_code = failure_code.strip()[:100] if failure_code else None
+            record.failure_message = failure_message.strip()[:2000] if failure_message else None
+        self._session.flush()
+        return record
+
+    @staticmethod
+    def _status_value(status: BackgroundJobStatus | str) -> str:
+        try:
+            return BackgroundJobStatus(status).value
+        except ValueError as error:
+            raise ValueError("invalid background job status") from error
 
 class SourceFileRepository:
     def __init__(self, session: Session) -> None:

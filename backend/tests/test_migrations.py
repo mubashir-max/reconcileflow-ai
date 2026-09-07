@@ -26,7 +26,7 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path) -> None:
         "alembic_version", "audit_events", "configuration_snapshots",
         "reconciliation_results", "reconciliation_runs", "source_files",
         "organizations", "organization_memberships", "users", "refresh_tokens",
-        "security_audit_events",
+        "security_audit_events", "background_jobs",
     }
     engine.dispose()
 
@@ -109,6 +109,28 @@ def test_security_audit_database_can_add_and_remove_login_protection(tmp_path: P
     engine = create_engine(database_url)
     columns = {column["name"] for column in inspect(engine).get_columns("users")}
     assert not {"failed_login_attempts", "locked_until"} & columns
+    engine.dispose()
+
+
+def test_login_protection_database_can_add_and_remove_background_jobs(tmp_path: Path) -> None:
+    database_path = tmp_path / "background-jobs-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+
+    command.upgrade(config, "a4c8d2e71f50")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+    assert "background_jobs" in inspector.get_table_names()
+    assert {
+        "organization_id", "run_id", "status", "progress_percentage",
+        "attempt_count", "max_attempts", "scheduled_at", "retry_at",
+    } <= {column["name"] for column in inspector.get_columns("background_jobs")}
+    engine.dispose()
+
+    command.downgrade(config, "a4c8d2e71f50")
+    engine = create_engine(database_url)
+    assert "background_jobs" not in inspect(engine).get_table_names()
     engine.dispose()
 
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:

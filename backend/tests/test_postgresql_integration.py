@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import inspect, select
 
 from reconcileflow.api import APISettings, create_app
-from reconcileflow.persistence import OrganizationMembershipRecord
+from reconcileflow.persistence import OrganizationMembershipRecord, PersistenceUnitOfWork
 
 
 DATABASE_URL = os.getenv("RECONCILEFLOW_TEST_POSTGRESQL_URL")
@@ -49,6 +50,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "users",
             "refresh_tokens",
             "security_audit_events",
+            "background_jobs",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
 
@@ -136,6 +138,16 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             results = await client.get(f"/api/v1/reconciliation-runs/{run_id}/results")
             audit = await client.get(f"/api/v1/reconciliation-runs/{run_id}/audit-events")
             with app.state.database.session() as session:
+                with PersistenceUnitOfWork(session) as work:
+                    background_job = work.background_jobs.create(
+                        organization_id=uuid.UUID(organization_id),
+                        run_id=uuid.UUID(run_id),
+                        scheduled_at=datetime.now(UTC),
+                    )
+                with PersistenceUnitOfWork(session) as work:
+                    claimed_job = work.background_jobs.claim_next(
+                        organization_id=uuid.UUID(organization_id)
+                    )
                 membership = session.scalar(
                     select(OrganizationMembershipRecord).where(
                         OrganizationMembershipRecord.organization_id == uuid.UUID(
@@ -184,6 +196,9 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert executed.json()["status"] == "SUCCEEDED"
         assert results.json()["total"] == 8
         assert audit.json()["items"][-1]["event_type"] == "RUN_SUCCEEDED"
+        assert claimed_job.id == background_job.id
+        assert claimed_job.status == "RUNNING"
+        assert claimed_job.attempt_count == 1
         assert viewer_write.status_code == 403
         assert viewer_write.json()["error"]["code"] == "INSUFFICIENT_ROLE"
         assert viewer_read.status_code == 200

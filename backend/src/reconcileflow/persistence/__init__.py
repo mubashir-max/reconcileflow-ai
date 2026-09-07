@@ -6,6 +6,9 @@ from .dependencies import DatabaseDependency, SessionDependency, get_database, g
 from .errors import InvalidStatusTransitionError, PersistenceConflictError, PersistenceError, RecordNotFoundError
 from .models import (
     AuditEventRecord,
+    BACKGROUND_JOB_STATUSES,
+    BackgroundJobRecord,
+    BackgroundJobStatus,
     ConfigurationSnapshotRecord,
     MEMBERSHIP_ROLES,
     OrganizationMembershipRecord,
@@ -19,6 +22,7 @@ from .models import (
 )
 from .repositories import (
     AuditEventRepository,
+    BackgroundJobRepository,
     ConfigurationSnapshotRepository,
     OrganizationMembershipRepository,
     OrganizationRepository,
@@ -35,6 +39,10 @@ from .unit_of_work import PersistenceUnitOfWork
 __all__ = [
     "AuditEventRecord",
     "AuditEventRepository",
+    "BACKGROUND_JOB_STATUSES",
+    "BackgroundJobRecord",
+    "BackgroundJobRepository",
+    "BackgroundJobStatus",
     "Base",
     "ConfigurationSnapshotRecord",
     "ConfigurationSnapshotRepository",
