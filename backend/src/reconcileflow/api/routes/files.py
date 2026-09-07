@@ -5,18 +5,23 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 
 from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency
 from reconcileflow.storage import EmptyUploadError, UnsupportedUploadError, UploadTooLargeError
 
 from ..errors import APIError
+from ..auth_dependencies import get_current_user
 from ..file_schemas import SourceFileListResponse, SourceFileMetadataResponse, SourceFileType
 from ..schemas import ErrorResponse
 from ..storage_dependencies import FileStorageDependency
 
 
-router = APIRouter(tags=["source files"])
+router = APIRouter(
+    tags=["source files"],
+    dependencies=[Depends(get_current_user)],
+    responses={401: {"model": ErrorResponse, "description": "A valid access token is required."}},
+)
 ERROR_RESPONSES = {
     404: {"model": ErrorResponse, "description": "The reconciliation run or file does not exist."},
     409: {"model": ErrorResponse, "description": "The upload conflicts with the run state or existing data."},

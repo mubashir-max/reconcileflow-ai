@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 
 from reconcileflow.api import APISettings, create_app
+from reconcileflow.api.auth_dependencies import get_current_user
 from reconcileflow.persistence import Base, PersistenceUnitOfWork, SourceFileRepository
 
 
@@ -22,6 +23,7 @@ def file_app(tmp_path):
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'files.db').as_posix()}"
     app = create_app(APISettings(environment="test", database_url=database_url, upload_directory=tmp_path / "uploads", max_upload_size_bytes=100_000, _env_file=None))
     Base.metadata.create_all(app.state.database.engine)
+    app.dependency_overrides[get_current_user] = lambda: object()
     yield app
     app.state.database.dispose()
 
