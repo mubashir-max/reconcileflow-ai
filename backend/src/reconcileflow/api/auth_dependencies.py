@@ -106,3 +106,19 @@ def get_reconciliation_operator(tenant: TenantContextDependency) -> TenantContex
 
 
 ReconciliationOperatorDependency = Annotated[TenantContext, Depends(get_reconciliation_operator)]
+
+MEMBERSHIP_MANAGER_ROLES = frozenset({"OWNER", "ADMIN"})
+
+
+def get_membership_manager(tenant: TenantContextDependency) -> TenantContext:
+    """Require an organization role allowed to manage memberships."""
+    if tenant.role not in MEMBERSHIP_MANAGER_ROLES:
+        raise APIError(
+            status_code=403,
+            code="INSUFFICIENT_ROLE",
+            message="Your organization role does not permit membership management.",
+        )
+    return tenant
+
+
+MembershipManagerDependency = Annotated[TenantContext, Depends(get_membership_manager)]

@@ -121,6 +121,53 @@ class OrganizationMembershipRepository:
             )
         )
 
+    def get(self, membership_id: uuid.UUID, *, organization_id: uuid.UUID, lock: bool = False) -> OrganizationMembershipRecord:
+        statement = select(OrganizationMembershipRecord).where(
+            OrganizationMembershipRecord.id == membership_id,
+            OrganizationMembershipRecord.organization_id == organization_id,
+        )
+        if lock:
+            statement = statement.with_for_update()
+        record = self._session.scalar(statement)
+        if record is None:
+            raise RecordNotFoundError(f"organization membership {membership_id} was not found")
+        return record
+
+    def get_for_user(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMembershipRecord | None:
+        return self._session.scalar(
+            select(OrganizationMembershipRecord).where(
+                OrganizationMembershipRecord.organization_id == organization_id,
+                OrganizationMembershipRecord.user_id == user_id,
+            )
+        )
+
+    def list_for_organization(self, organization_id: uuid.UUID) -> list[OrganizationMembershipRecord]:
+        statement = (
+            select(OrganizationMembershipRecord)
+            .where(OrganizationMembershipRecord.organization_id == organization_id)
+            .order_by(OrganizationMembershipRecord.created_at, OrganizationMembershipRecord.id)
+        )
+        return list(self._session.scalars(statement))
+
+    def count_active_owners(self, organization_id: uuid.UUID) -> int:
+        return self._session.scalar(
+            select(func.count()).select_from(OrganizationMembershipRecord).where(
+                OrganizationMembershipRecord.organization_id == organization_id,
+                OrganizationMembershipRecord.role == "OWNER",
+                OrganizationMembershipRecord.is_active.is_(True),
+            )
+        ) or 0
+
+    def set_role(self, record: OrganizationMembershipRecord, role: str) -> OrganizationMembershipRecord:
+        record.role = role
+        self._session.flush()
+        return record
+
+    def deactivate(self, record: OrganizationMembershipRecord) -> OrganizationMembershipRecord:
+        record.is_active = False
+        self._session.flush()
+        return record
+
 
 class RefreshTokenRepository:
     def __init__(self, session: Session) -> None:
