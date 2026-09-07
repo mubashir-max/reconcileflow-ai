@@ -76,6 +76,13 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             )
             client.headers["Authorization"] = f"Bearer {access_token}"
             client.headers["X-Organization-ID"] = registered.json()["membership"]["organization"]["id"]
+            organization_id = client.headers["X-Organization-ID"]
+            organizations = await client.get("/api/v1/organizations")
+            organization_profile = await client.get(f"/api/v1/organizations/{organization_id}")
+            organization_updated = await client.patch(
+                f"/api/v1/organizations/{organization_id}",
+                json={"name": "Updated Integration Organization"},
+            )
             secondary_email = f"member-{uuid.uuid4().hex}@example.com"
             secondary = await client.post("/api/v1/auth/register", json={
                 "email": secondary_email,
@@ -129,6 +136,14 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert refreshed.status_code == 200
         assert refreshed.json()["refresh_token"] != refresh_token
         assert logged_out.status_code == 204
+        assert organizations.status_code == 200
+        assert any(item["id"] == organization_id for item in organizations.json()["items"])
+        assert organization_profile.status_code == 200
+        assert organization_profile.json()["current_user_role"] == "OWNER"
+        assert organization_updated.status_code == 200
+        assert organization_updated.json()["name"] == "Updated Integration Organization"
+        assert organization_updated.json()["id"] == organization_profile.json()["id"]
+        assert organization_updated.json()["slug"] == organization_profile.json()["slug"]
         assert secondary.status_code == member_added.status_code == 201
         assert member_updated.status_code == 200
         assert member_updated.json()["role"] == "ANALYST"

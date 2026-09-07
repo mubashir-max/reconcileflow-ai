@@ -62,6 +62,17 @@ class OrganizationRepository:
     def slug_exists(self, slug: str) -> bool:
         return self._session.scalar(select(OrganizationRecord.id).where(OrganizationRecord.slug == slug)) is not None
 
+    def get(self, organization_id: uuid.UUID) -> OrganizationRecord:
+        record = self._session.get(OrganizationRecord, organization_id)
+        if record is None:
+            raise RecordNotFoundError(f"organization {organization_id} was not found")
+        return record
+
+    def update_name(self, record: OrganizationRecord, name: str) -> OrganizationRecord:
+        record.name = name.strip()
+        self._session.flush()
+        return record
+
 
 class UserRepository:
     def __init__(self, session: Session) -> None:
