@@ -11,7 +11,7 @@ from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency
 from reconcileflow.storage import EmptyUploadError, UnsupportedUploadError, UploadTooLargeError
 
 from ..errors import APIError
-from ..auth_dependencies import get_current_user
+from ..auth_dependencies import TenantContextDependency, get_tenant_context
 from ..file_schemas import SourceFileListResponse, SourceFileMetadataResponse, SourceFileType
 from ..schemas import ErrorResponse
 from ..storage_dependencies import FileStorageDependency
@@ -19,8 +19,8 @@ from ..storage_dependencies import FileStorageDependency
 
 router = APIRouter(
     tags=["source files"],
-    dependencies=[Depends(get_current_user)],
-    responses={401: {"model": ErrorResponse, "description": "A valid access token is required."}},
+    dependencies=[Depends(get_tenant_context)],
+    responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
 )
 ERROR_RESPONSES = {
     404: {"model": ErrorResponse, "description": "The reconciliation run or file does not exist."},
@@ -56,13 +56,14 @@ async def upload_source_file(
     run_id: uuid.UUID,
     session: SessionDependency,
     storage: FileStorageDependency,
+    tenant: TenantContextDependency,
     source_type: Annotated[SourceFileType, Form()],
     file: Annotated[UploadFile, File()],
 ) -> SourceFileMetadataResponse:
     stored = None
     try:
         with PersistenceUnitOfWork(session) as work:
-            run = work.runs.get(run_id, lock=True)
+            run = work.runs.get(run_id, organization_id=tenant.organization_id, lock=True)
             if run.status != "PENDING":
                 raise APIError(
                     status_code=409,
@@ -99,9 +100,9 @@ async def upload_source_file(
     summary="List source files for a reconciliation run",
     responses={404: ERROR_RESPONSES[404], 422: ERROR_RESPONSES[422]},
 )
-def list_source_files(run_id: uuid.UUID, session: SessionDependency) -> SourceFileListResponse:
+def list_source_files(run_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency) -> SourceFileListResponse:
     work = PersistenceUnitOfWork(session)
-    work.runs.get(run_id)
+    work.runs.get(run_id, organization_id=tenant.organization_id)
     records = work.source_files.list_for_run(run_id)
     return SourceFileListResponse(items=[_response(record) for record in records], total=len(records))
 
@@ -112,5 +113,5 @@ def list_source_files(run_id: uuid.UUID, session: SessionDependency) -> SourceFi
     summary="Get uploaded source-file metadata",
     responses={404: ERROR_RESPONSES[404], 422: ERROR_RESPONSES[422]},
 )
-def get_source_file(file_id: uuid.UUID, session: SessionDependency) -> SourceFileMetadataResponse:
-    return _response(PersistenceUnitOfWork(session).source_files.get(file_id))
+def get_source_file(file_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency) -> SourceFileMetadataResponse:
+    return _response(PersistenceUnitOfWork(session).source_files.get(file_id, organization_id=tenant.organization_id))

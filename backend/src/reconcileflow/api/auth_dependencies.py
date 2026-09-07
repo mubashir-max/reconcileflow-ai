@@ -1,9 +1,11 @@
 """Password, token, and authenticated-user dependencies."""
 
 from datetime import timedelta
+from dataclasses import dataclass
+import uuid
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from reconcileflow.auth import PasswordManager, TokenManager, TokenValidationError
@@ -58,3 +60,33 @@ def get_current_user(
 
 
 CurrentUserDependency = Annotated[UserRecord, Depends(get_current_user)]
+
+
+@dataclass(frozen=True, slots=True)
+class TenantContext:
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    role: str
+
+
+def get_tenant_context(
+    user: CurrentUserDependency,
+    database: DatabaseDependency,
+    organization_header: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
+) -> TenantContext:
+    if organization_header is None:
+        raise APIError(status_code=400, code="ORGANIZATION_REQUIRED", message="X-Organization-ID is required.")
+    try:
+        organization_id = uuid.UUID(organization_header)
+    except (ValueError, TypeError) as error:
+        raise APIError(status_code=400, code="INVALID_ORGANIZATION", message="X-Organization-ID must be a valid UUID.") from error
+    with database.session() as session:
+        membership = PersistenceUnitOfWork(session).memberships.get_active(
+            organization_id=organization_id, user_id=user.id
+        )
+        if membership is None:
+            raise APIError(status_code=403, code="ORGANIZATION_ACCESS_DENIED", message="Access to this organization is denied.")
+        return TenantContext(organization_id=organization_id, user_id=user.id, role=membership.role)
+
+
+TenantContextDependency = Annotated[TenantContext, Depends(get_tenant_context)]

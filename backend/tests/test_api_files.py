@@ -9,8 +9,11 @@ from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 
 from reconcileflow.api import APISettings, create_app
-from reconcileflow.api.auth_dependencies import get_current_user
-from reconcileflow.persistence import Base, PersistenceUnitOfWork, SourceFileRepository
+from reconcileflow.api.auth_dependencies import TenantContext, get_current_user, get_tenant_context
+from reconcileflow.persistence import Base, OrganizationRecord, PersistenceUnitOfWork, SourceFileRepository
+
+
+TEST_ORGANIZATION_ID = uuid.UUID("10000000-0000-0000-0000-000000000002")
 
 
 @pytest.fixture
@@ -24,6 +27,10 @@ def file_app(tmp_path):
     app = create_app(APISettings(environment="test", database_url=database_url, upload_directory=tmp_path / "uploads", max_upload_size_bytes=100_000, _env_file=None))
     Base.metadata.create_all(app.state.database.engine)
     app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(TEST_ORGANIZATION_ID, uuid.uuid4(), "OWNER")
+    with app.state.database.session() as session:
+        session.add(OrganizationRecord(id=TEST_ORGANIZATION_ID, name="File Organization", slug="file-organization"))
+        session.commit()
     yield app
     app.state.database.dispose()
 

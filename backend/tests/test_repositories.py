@@ -14,6 +14,7 @@ from reconcileflow.persistence import (
     AuditEventRecord,
     Base,
     InvalidStatusTransitionError,
+    OrganizationRecord,
     Page,
     PersistenceConflictError,
     PersistenceUnitOfWork,
@@ -23,11 +24,16 @@ from reconcileflow.persistence import (
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationResult
 
 
+TEST_ORGANIZATION_ID = uuid.UUID("10000000-0000-0000-0000-000000000004")
+
+
 @pytest.fixture
 def session() -> Session:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as database_session:
+        database_session.add(OrganizationRecord(id=TEST_ORGANIZATION_ID, name="Repository Organization", slug="repository-organization"))
+        database_session.commit()
         yield database_session
     engine.dispose()
 
@@ -49,7 +55,7 @@ def _result(result_id: str, status: ReconciliationStatus = ReconciliationStatus.
 
 def test_unit_of_work_commits_complete_run_bundle(session: Session) -> None:
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.create()
+        run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
         work.source_files.add(
             run_id=run.id,
             source_type="BANK_TRANSACTIONS",
@@ -76,7 +82,7 @@ def test_unit_of_work_commits_complete_run_bundle(session: Session) -> None:
 def test_unit_of_work_rolls_back_every_related_write(session: Session) -> None:
     with pytest.raises(RuntimeError, match="simulated failure"):
         with PersistenceUnitOfWork(session) as work:
-            run = work.runs.create()
+            run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
             work.results.add_many(run.id, [_result("001")])
             raise RuntimeError("simulated failure")
 
@@ -85,7 +91,7 @@ def test_unit_of_work_rolls_back_every_related_write(session: Session) -> None:
 
 def test_run_transitions_capture_times_and_reject_terminal_changes(session: Session) -> None:
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.create()
+        run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
     started = datetime.now(UTC)
     with PersistenceUnitOfWork(session) as work:
         running = work.runs.transition(run.id, "RUNNING", at=started)
@@ -101,7 +107,7 @@ def test_run_transitions_capture_times_and_reject_terminal_changes(session: Sess
 
 def test_failed_run_stores_safe_failure_fields(session: Session) -> None:
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.create()
+        run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
         work.runs.transition(run.id, "FAILED", error_code="INGESTION_FAILED", error_message="Input could not be processed.")
     loaded = PersistenceUnitOfWork(session).runs.get(run.id)
     assert loaded.error_code == "INGESTION_FAILED"
@@ -116,7 +122,7 @@ def test_repository_raises_safe_not_found_error(session: Session) -> None:
 
 def test_duplicate_configuration_is_a_persistence_conflict(session: Session) -> None:
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.create()
+        run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
         work.configurations.add(run.id, ReconciliationConfig())
     with pytest.raises(PersistenceConflictError):
         with PersistenceUnitOfWork(session) as work:
@@ -127,7 +133,7 @@ def test_run_filtering_order_and_pagination(session: Session) -> None:
     run_ids: list[uuid.UUID] = []
     for status in ("FAILED", "PENDING", "PENDING"):
         with PersistenceUnitOfWork(session) as work:
-            run = work.runs.create()
+            run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
             if status == "FAILED":
                 work.runs.transition(run.id, "FAILED")
             run_ids.append(run.id)
@@ -145,7 +151,7 @@ def test_invalid_pagination_is_rejected(page) -> None:
 
 def test_result_status_filter_and_domain_translation(session: Session) -> None:
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.create()
+        run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
         work.results.add_many(run.id, [_result("001"), _result("002", ReconciliationStatus.REQUIRES_REVIEW)])
     review = PersistenceUnitOfWork(session).results.list_for_run(run.id, status="REQUIRES_REVIEW")
     assert [record.external_result_id for record in review] == ["002"]
@@ -159,7 +165,7 @@ def test_invalid_result_status_filter_is_rejected(session: Session) -> None:
 
 def test_audit_events_receive_ordered_sequence_numbers(session: Session) -> None:
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.create()
+        run = work.runs.create(organization_id=TEST_ORGANIZATION_ID)
     for event_type in (AuditEventType.RUN_STARTED, AuditEventType.RUN_SUCCEEDED):
         with PersistenceUnitOfWork(session) as work:
             work.audit_events.append(AuditEvent(run_id=str(run.id), event=event_type, timestamp=datetime.now(UTC).isoformat()))
@@ -171,7 +177,7 @@ def test_audit_events_receive_ordered_sequence_numbers(session: Session) -> None
 def test_unit_of_work_translates_database_integrity_errors(session: Session) -> None:
     duplicate_id = uuid.uuid4()
     with PersistenceUnitOfWork(session) as work:
-        work.runs.create(run_id=duplicate_id)
+        work.runs.create(organization_id=TEST_ORGANIZATION_ID, run_id=duplicate_id)
     with pytest.raises(PersistenceConflictError, match="conflicting persistence data"):
         with PersistenceUnitOfWork(session) as work:
-            work.runs.create(run_id=duplicate_id)
+            work.runs.create(organization_id=TEST_ORGANIZATION_ID, run_id=duplicate_id)

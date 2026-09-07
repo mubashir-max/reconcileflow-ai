@@ -7,8 +7,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from reconcileflow.api import APISettings, create_app
-from reconcileflow.api.auth_dependencies import get_current_user
-from reconcileflow.persistence import Base, ConfigurationSnapshotRepository, PersistenceConflictError, PersistenceUnitOfWork, ReconciliationRunRecord
+from reconcileflow.api.auth_dependencies import TenantContext, get_current_user, get_tenant_context
+from reconcileflow.persistence import Base, ConfigurationSnapshotRepository, OrganizationRecord, PersistenceConflictError, PersistenceUnitOfWork, ReconciliationRunRecord
+
+
+TEST_ORGANIZATION_ID = uuid.UUID("10000000-0000-0000-0000-000000000001")
 
 
 @pytest.fixture
@@ -22,6 +25,10 @@ def run_app(tmp_path):
     app = create_app(APISettings(environment="test", database_url=database_url, _env_file=None))
     Base.metadata.create_all(app.state.database.engine)
     app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(TEST_ORGANIZATION_ID, uuid.uuid4(), "OWNER")
+    with app.state.database.session() as session:
+        session.add(OrganizationRecord(id=TEST_ORGANIZATION_ID, name="Test Organization", slug="test-organization"))
+        session.commit()
     yield app
     app.state.database.dispose()
 
@@ -44,6 +51,7 @@ async def test_create_and_retrieve_reconciliation_run(run_app):
         body = created.json()
         uuid.UUID(body["id"])
         assert body["status"] == "PENDING"
+        assert body["organization_id"] == str(TEST_ORGANIZATION_ID)
         assert body["configuration"] == {
             "amount_tolerance": "0.5000",
             "date_tolerance_days": 3,

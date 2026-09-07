@@ -1,11 +1,15 @@
 from pathlib import Path
+import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from reconcileflow.api import APISettings, create_app
-from reconcileflow.api.auth_dependencies import get_current_user
-from reconcileflow.persistence import Base
+from reconcileflow.api.auth_dependencies import TenantContext, get_current_user, get_tenant_context
+from reconcileflow.persistence import Base, OrganizationRecord
+
+
+TEST_ORGANIZATION_ID = uuid.UUID("10000000-0000-0000-0000-000000000003")
 
 
 SAMPLES = Path(__file__).parents[2] / "data" / "sample"
@@ -26,6 +30,10 @@ def execution_app(tmp_path):
     ))
     Base.metadata.create_all(app.state.database.engine)
     app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(TEST_ORGANIZATION_ID, uuid.uuid4(), "OWNER")
+    with app.state.database.session() as session:
+        session.add(OrganizationRecord(id=TEST_ORGANIZATION_ID, name="Execution Organization", slug="execution-organization"))
+        session.commit()
     yield app
     app.state.database.dispose()
 
