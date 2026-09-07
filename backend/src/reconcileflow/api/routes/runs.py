@@ -20,7 +20,7 @@ from ..run_schemas import (
     ReconciliationRunStatus,
 )
 from ..schemas import ErrorResponse
-from ..auth_dependencies import TenantContextDependency, get_tenant_context
+from ..auth_dependencies import ReconciliationOperatorDependency, TenantContextDependency, get_tenant_context
 
 
 router = APIRouter(
@@ -64,9 +64,10 @@ def _run_response(run, configuration) -> ReconciliationRunResponse:
     response_model=ReconciliationRunResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a reconciliation run",
+    description="Requires the OWNER, ADMIN, or ANALYST organization role.",
     responses={409: ERROR_RESPONSES[409], 422: ERROR_RESPONSES[422]},
 )
-def create_reconciliation_run(request: CreateReconciliationRunRequest, session: SessionDependency, tenant: TenantContextDependency) -> ReconciliationRunResponse:
+def create_reconciliation_run(request: CreateReconciliationRunRequest, session: SessionDependency, tenant: ReconciliationOperatorDependency) -> ReconciliationRunResponse:
     domain_config = ReconciliationConfig(
         amount_tolerance=request.configuration.amount_tolerance,
         date_tolerance_days=request.configuration.date_tolerance_days,
