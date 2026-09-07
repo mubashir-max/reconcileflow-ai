@@ -87,6 +87,20 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             security_audit = await client.get(
                 f"/api/v1/organizations/{organization_id}/security-audit-events"
             )
+            changed_password = await client.post(
+                "/api/v1/auth/change-password",
+                json={
+                    "current_password": "correct horse battery staple",
+                    "new_password": "updated correct horse battery staple",
+                },
+            )
+            revoked_refresh = await client.post(
+                "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+            )
+            new_password_login = await client.post("/api/v1/auth/login", json={
+                "email": email,
+                "password": "updated correct horse battery staple",
+            })
             secondary_email = f"member-{uuid.uuid4().hex}@example.com"
             secondary = await client.post("/api/v1/auth/register", json={
                 "email": secondary_email,
@@ -152,6 +166,9 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert {item["event_type"] for item in security_audit.json()["items"]} >= {
             "USER_REGISTERED", "USER_LOGGED_IN", "ORGANIZATION_PROFILE_UPDATED"
         }
+        assert changed_password.status_code == 204
+        assert revoked_refresh.status_code == 401
+        assert new_password_login.status_code == 200
         assert secondary.status_code == member_added.status_code == 201
         assert member_updated.status_code == 200
         assert member_updated.json()["role"] == "ANALYST"

@@ -108,6 +108,18 @@ class RefreshTokenRequest(StrictModel):
     refresh_token: str = Field(min_length=20, max_length=4096)
 
 
+class ChangePasswordRequest(StrictModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def reject_blank_new_password(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("new password must not be blank")
+        return value
+
+
 class TokenPairResponse(StrictModel):
     access_token: str
     refresh_token: str
