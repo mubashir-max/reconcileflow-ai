@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, Uuid, func, true
@@ -24,6 +25,18 @@ RESULT_STATUSES = (
     "MANY_TO_ONE_MATCH", "ONE_TO_MANY_MATCH", "DUPLICATE", "REQUIRES_REVIEW",
 )
 MEMBERSHIP_ROLES = ("OWNER", "ADMIN", "ANALYST", "VIEWER")
+
+
+class BackgroundJobStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
+    CANCELLED = "CANCELLED"
+
+
+BACKGROUND_JOB_STATUSES = tuple(status.value for status in BackgroundJobStatus)
 
 
 class OrganizationRecord(Base):
@@ -47,6 +60,7 @@ class OrganizationRecord(Base):
         back_populates="organization", cascade="all, delete-orphan"
     )
     reconciliation_runs: Mapped[list[ReconciliationRunRecord]] = relationship(back_populates="organization")
+    background_jobs: Mapped[list[BackgroundJobRecord]] = relationship(back_populates="organization")
 
 
 class UserRecord(Base):
@@ -156,6 +170,56 @@ class ReconciliationRunRecord(Base):
     results: Mapped[list[ReconciliationResultRecord]] = relationship(back_populates="run")
     audit_events: Mapped[list[AuditEventRecord]] = relationship(back_populates="run", order_by="AuditEventRecord.sequence_number")
     organization: Mapped[OrganizationRecord] = relationship(back_populates="reconciliation_runs")
+    background_job: Mapped[BackgroundJobRecord | None] = relationship(
+        back_populates="run", uselist=False
+    )
+
+
+class BackgroundJobRecord(Base):
+    """Durable queue state for asynchronous reconciliation execution."""
+
+    __tablename__ = "background_jobs"
+    __table_args__ = (
+        CheckConstraint(f"status IN {BACKGROUND_JOB_STATUSES}", name="valid_status"),
+        CheckConstraint(
+            "progress_percentage >= 0 AND progress_percentage <= 100",
+            name="valid_progress_percentage",
+        ),
+        CheckConstraint("attempt_count >= 0", name="nonnegative_attempt_count"),
+        CheckConstraint("max_attempts >= 1", name="positive_max_attempts"),
+        CheckConstraint("attempt_count <= max_attempts", name="attempts_within_limit"),
+        CheckConstraint(
+            "completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at",
+            name="valid_execution_time_range",
+        ),
+        Index("ix_background_jobs_queue", "status", "scheduled_at", "retry_at", "created_at"),
+        Index("ix_background_jobs_organization_status", "organization_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reconciliation_runs.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="QUEUED", server_default="QUEUED")
+    progress_percentage: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    status_message: Mapped[str | None] = mapped_column(String(500))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_code: Mapped[str | None] = mapped_column(String(100))
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="background_jobs")
+    run: Mapped[ReconciliationRunRecord] = relationship(back_populates="background_job")
 
 
 class SourceFileRecord(Base):
