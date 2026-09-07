@@ -15,7 +15,7 @@ from reconcileflow.persistence import Page, PersistenceUnitOfWork, SessionDepend
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationEngine
 
 from ..errors import APIError
-from ..auth_dependencies import get_current_user
+from ..auth_dependencies import TenantContextDependency, get_tenant_context
 from ..execution_schemas import AuditEventListResponse, AuditEventResponse, ExecutionResponse, ReconciliationResultStatus, ResultListResponse, ResultResponse
 from ..schemas import ErrorResponse
 from ..storage_dependencies import FileStorageDependency
@@ -23,8 +23,8 @@ from ..storage_dependencies import FileStorageDependency
 
 router = APIRouter(
     tags=["reconciliation execution"],
-    dependencies=[Depends(get_current_user)],
-    responses={401: {"model": ErrorResponse, "description": "A valid access token is required."}},
+    dependencies=[Depends(get_tenant_context)],
+    responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
 )
 ERROR_RESPONSES = {404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 
@@ -38,9 +38,9 @@ def _audit(record) -> AuditEventResponse:
 
 
 @router.post("/reconciliation-runs/{run_id}/execute", response_model=ExecutionResponse, responses=ERROR_RESPONSES, summary="Execute a pending reconciliation run")
-def execute_run(run_id: uuid.UUID, session: SessionDependency, storage: FileStorageDependency) -> ExecutionResponse:
+def execute_run(run_id: uuid.UUID, session: SessionDependency, storage: FileStorageDependency, tenant: TenantContextDependency) -> ExecutionResponse:
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.get(run_id, lock=True)
+        run = work.runs.get(run_id, organization_id=tenant.organization_id, lock=True)
         if run.status != "PENDING":
             raise APIError(status_code=409, code="RUN_NOT_PENDING", message="Only a pending reconciliation run can be executed.")
         files = {item.source_type: item for item in work.source_files.list_for_run(run_id)}
@@ -48,7 +48,7 @@ def execute_run(run_id: uuid.UUID, session: SessionDependency, storage: FileStor
         if missing:
             raise APIError(status_code=422, code="MISSING_SOURCE_FILES", message="Bank transactions and ERP invoices are required before execution.")
         config_record = work.configurations.get_for_run(run_id)
-        work.runs.transition(run_id, "RUNNING")
+        work.runs.transition(run_id, "RUNNING", organization_id=tenant.organization_id)
 
     config = ReconciliationConfig(
         amount_tolerance=config_record.amount_tolerance,
@@ -83,7 +83,7 @@ def execute_run(run_id: uuid.UUID, session: SessionDependency, storage: FileStor
             work.results.add_many(run_id, results)
             for event in trail.events:
                 work.audit_events.append(event)
-            work.runs.transition(run_id, "SUCCEEDED")
+            work.runs.transition(run_id, "SUCCEEDED", organization_id=tenant.organization_id)
         return ExecutionResponse(run_id=run_id, status="SUCCEEDED", result_count=len(results), results_requiring_review=review_count)
     except APIError:
         raise
@@ -91,33 +91,33 @@ def execute_run(run_id: uuid.UUID, session: SessionDependency, storage: FileStor
         if 'trail' in locals():
             trail.fail(error)
         with PersistenceUnitOfWork(session) as work:
-            current = work.runs.get(run_id)
+            current = work.runs.get(run_id, organization_id=tenant.organization_id)
             if current.status == "RUNNING":
                 if 'trail' in locals():
                     for event in trail.events:
                         if event.event is not AuditEventType.RUN_SUCCEEDED:
                             work.audit_events.append(event)
-                work.runs.transition(run_id, "FAILED", error_code="EXECUTION_FAILED", error_message="Reconciliation execution failed.")
+                work.runs.transition(run_id, "FAILED", error_code="EXECUTION_FAILED", error_message="Reconciliation execution failed.", organization_id=tenant.organization_id)
         raise APIError(status_code=422, code="EXECUTION_FAILED", message="Reconciliation execution failed. Check the source files and configuration.") from error
 
 
 @router.get("/reconciliation-runs/{run_id}/results", response_model=ResultListResponse, responses=ERROR_RESPONSES, summary="List reconciliation results")
-def list_results(run_id: uuid.UUID, session: SessionDependency, limit: Annotated[int, Query(ge=1, le=100)] = 50, offset: Annotated[int, Query(ge=0)] = 0, result_status: Annotated[ReconciliationResultStatus | None, Query(alias="status")] = None, requires_review: bool | None = None) -> ResultListResponse:
+def list_results(run_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency, limit: Annotated[int, Query(ge=1, le=100)] = 50, offset: Annotated[int, Query(ge=0)] = 0, result_status: Annotated[ReconciliationResultStatus | None, Query(alias="status")] = None, requires_review: bool | None = None) -> ResultListResponse:
     work = PersistenceUnitOfWork(session)
-    work.runs.get(run_id)
+    work.runs.get(run_id, organization_id=tenant.organization_id)
     status_value = result_status.value if result_status else None
     records = work.results.list_for_run(run_id, page=Page(limit, offset), status=status_value, requires_review=requires_review)
     return ResultListResponse(items=[_result(item) for item in records], total=work.results.count_for_run(run_id, status=status_value, requires_review=requires_review), limit=limit, offset=offset)
 
 
 @router.get("/results/{result_id}", response_model=ResultResponse, responses=ERROR_RESPONSES, summary="Get a reconciliation result")
-def get_result(result_id: uuid.UUID, session: SessionDependency) -> ResultResponse:
-    return _result(PersistenceUnitOfWork(session).results.get(result_id))
+def get_result(result_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency) -> ResultResponse:
+    return _result(PersistenceUnitOfWork(session).results.get(result_id, organization_id=tenant.organization_id))
 
 
 @router.get("/reconciliation-runs/{run_id}/audit-events", response_model=AuditEventListResponse, responses=ERROR_RESPONSES, summary="List reconciliation audit events")
-def list_audit_events(run_id: uuid.UUID, session: SessionDependency, limit: Annotated[int, Query(ge=1, le=100)] = 50, offset: Annotated[int, Query(ge=0)] = 0) -> AuditEventListResponse:
+def list_audit_events(run_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency, limit: Annotated[int, Query(ge=1, le=100)] = 50, offset: Annotated[int, Query(ge=0)] = 0) -> AuditEventListResponse:
     work = PersistenceUnitOfWork(session)
-    work.runs.get(run_id)
+    work.runs.get(run_id, organization_id=tenant.organization_id)
     records = work.audit_events.list_for_run(run_id, page=Page(limit, offset))
     return AuditEventListResponse(items=[_audit(item) for item in records], total=work.audit_events.count_for_run(run_id), limit=limit, offset=offset)

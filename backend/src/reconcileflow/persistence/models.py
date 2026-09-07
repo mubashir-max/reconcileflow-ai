@@ -46,6 +46,7 @@ class OrganizationRecord(Base):
     memberships: Mapped[list[OrganizationMembershipRecord]] = relationship(
         back_populates="organization", cascade="all, delete-orphan"
     )
+    reconciliation_runs: Mapped[list[ReconciliationRunRecord]] = relationship(back_populates="organization")
 
 
 class UserRecord(Base):
@@ -136,6 +137,9 @@ class ReconciliationRunRecord(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="PENDING")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -148,6 +152,7 @@ class ReconciliationRunRecord(Base):
     configuration: Mapped[ConfigurationSnapshotRecord | None] = relationship(back_populates="run", uselist=False)
     results: Mapped[list[ReconciliationResultRecord]] = relationship(back_populates="run")
     audit_events: Mapped[list[AuditEventRecord]] = relationship(back_populates="run", order_by="AuditEventRecord.sequence_number")
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="reconciliation_runs")
 
 
 class SourceFileRecord(Base):

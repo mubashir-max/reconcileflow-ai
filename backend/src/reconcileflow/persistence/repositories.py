@@ -109,6 +109,18 @@ class OrganizationMembershipRepository:
         )
         return list(self._session.scalars(statement))
 
+    def get_active(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMembershipRecord | None:
+        return self._session.scalar(
+            select(OrganizationMembershipRecord)
+            .join(OrganizationRecord)
+            .where(
+                OrganizationMembershipRecord.organization_id == organization_id,
+                OrganizationMembershipRecord.user_id == user_id,
+                OrganizationMembershipRecord.is_active.is_(True),
+                OrganizationRecord.is_active.is_(True),
+            )
+        )
+
 
 class RefreshTokenRepository:
     def __init__(self, session: Session) -> None:
@@ -191,14 +203,16 @@ class ReconciliationRunRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def create(self, *, run_id: uuid.UUID | None = None) -> ReconciliationRunRecord:
-        record = ReconciliationRunRecord(id=run_id or uuid.uuid4(), status="PENDING")
+    def create(self, *, organization_id: uuid.UUID, run_id: uuid.UUID | None = None) -> ReconciliationRunRecord:
+        record = ReconciliationRunRecord(id=run_id or uuid.uuid4(), organization_id=organization_id, status="PENDING")
         self._session.add(record)
         self._session.flush()
         return record
 
-    def get(self, run_id: uuid.UUID, *, lock: bool = False) -> ReconciliationRunRecord:
+    def get(self, run_id: uuid.UUID, *, organization_id: uuid.UUID | None = None, lock: bool = False) -> ReconciliationRunRecord:
         statement = select(ReconciliationRunRecord).where(ReconciliationRunRecord.id == run_id)
+        if organization_id is not None:
+            statement = statement.where(ReconciliationRunRecord.organization_id == organization_id)
         if lock:
             statement = statement.with_for_update()
         record = self._session.scalar(statement)
@@ -206,8 +220,10 @@ class ReconciliationRunRepository:
             raise RecordNotFoundError(f"reconciliation run {run_id} was not found")
         return record
 
-    def list(self, *, page: Page = Page(), status: str | None = None) -> list[ReconciliationRunRecord]:
+    def list(self, *, organization_id: uuid.UUID | None = None, page: Page = Page(), status: str | None = None) -> list[ReconciliationRunRecord]:
         statement = select(ReconciliationRunRecord)
+        if organization_id is not None:
+            statement = statement.where(ReconciliationRunRecord.organization_id == organization_id)
         if status is not None:
             if status not in self._TRANSITIONS:
                 raise ValueError("invalid reconciliation run status")
@@ -215,8 +231,10 @@ class ReconciliationRunRepository:
         statement = statement.order_by(ReconciliationRunRecord.created_at.desc(), ReconciliationRunRecord.id).limit(page.limit).offset(page.offset)
         return list(self._session.scalars(statement))
 
-    def count(self, *, status: str | None = None) -> int:
+    def count(self, *, organization_id: uuid.UUID | None = None, status: str | None = None) -> int:
         statement = select(func.count()).select_from(ReconciliationRunRecord)
+        if organization_id is not None:
+            statement = statement.where(ReconciliationRunRecord.organization_id == organization_id)
         if status is not None:
             if status not in self._TRANSITIONS:
                 raise ValueError("invalid reconciliation run status")
@@ -231,8 +249,9 @@ class ReconciliationRunRepository:
         at: datetime | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> ReconciliationRunRecord:
-        record = self.get(run_id, lock=True)
+        record = self.get(run_id, organization_id=organization_id, lock=True)
         if status not in self._TRANSITIONS[record.status]:
             raise InvalidStatusTransitionError(f"cannot transition run from {record.status} to {status}")
         occurred_at = _utc(at or datetime.now(UTC))
@@ -271,8 +290,13 @@ class SourceFileRepository:
         self._session.flush()
         return record
 
-    def get(self, file_id: uuid.UUID) -> SourceFileRecord:
-        record = self._session.get(SourceFileRecord, file_id)
+    def get(self, file_id: uuid.UUID, *, organization_id: uuid.UUID | None = None) -> SourceFileRecord:
+        statement = select(SourceFileRecord).where(SourceFileRecord.id == file_id)
+        if organization_id is not None:
+            statement = statement.join(ReconciliationRunRecord).where(
+                ReconciliationRunRecord.organization_id == organization_id
+            )
+        record = self._session.scalar(statement)
         if record is None:
             raise RecordNotFoundError(f"source file {file_id} was not found")
         return record
@@ -312,8 +336,13 @@ class ReconciliationResultRepository:
         self._session.flush()
         return records
 
-    def get(self, result_id: uuid.UUID) -> ReconciliationResultRecord:
-        record = self._session.get(ReconciliationResultRecord, result_id)
+    def get(self, result_id: uuid.UUID, *, organization_id: uuid.UUID | None = None) -> ReconciliationResultRecord:
+        statement = select(ReconciliationResultRecord).where(ReconciliationResultRecord.id == result_id)
+        if organization_id is not None:
+            statement = statement.join(ReconciliationRunRecord).where(
+                ReconciliationRunRecord.organization_id == organization_id
+            )
+        record = self._session.scalar(statement)
         if record is None:
             raise RecordNotFoundError(f"reconciliation result {result_id} was not found")
         return record

@@ -29,7 +29,7 @@ def authorization_app(tmp_path):
     app.state.database.dispose()
 
 
-async def _access_token(client: AsyncClient) -> str:
+async def _access_token(client: AsyncClient) -> tuple[str, str]:
     credentials = {
         "email": "protected@example.com",
         "password": "correct horse battery staple",
@@ -41,7 +41,7 @@ async def _access_token(client: AsyncClient) -> str:
     assert registered.status_code == 201
     logged_in = await client.post("/api/v1/auth/login", json=credentials)
     assert logged_in.status_code == 200
-    return logged_in.json()["access_token"]
+    return logged_in.json()["access_token"], registered.json()["membership"]["organization"]["id"]
 
 
 @pytest.mark.anyio
@@ -53,8 +53,9 @@ async def test_public_service_health_and_authentication_routes_remain_accessible
         assert (await client.get("/")).status_code == 200
         assert (await client.get("/api/v1/health/live")).status_code == 200
         assert (await client.get("/api/v1/health/ready")).status_code == 200
-        token = await _access_token(client)
+        token, organization_id = await _access_token(client)
         assert token
+        assert organization_id
 
 
 @pytest.mark.anyio
@@ -89,11 +90,11 @@ async def test_protected_routes_reject_invalid_token_and_accept_valid_access_tok
             "/api/v1/reconciliation-runs",
             headers={"Authorization": "Bearer invalid-token"},
         )
-        token = await _access_token(client)
+        token, organization_id = await _access_token(client)
         created = await client.post(
             "/api/v1/reconciliation-runs",
             json={},
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"Authorization": f"Bearer {token}", "X-Organization-ID": organization_id},
         )
     assert invalid.status_code == 401
     assert invalid.json()["error"]["code"] == "INVALID_ACCESS_TOKEN"

@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from reconcileflow.persistence import AuditEventRecord, Base, ConfigurationSnapshotRecord, ReconciliationResultRecord, ReconciliationRunRecord, SourceFileRecord
+from reconcileflow.persistence import AuditEventRecord, Base, ConfigurationSnapshotRecord, OrganizationRecord, ReconciliationResultRecord, ReconciliationRunRecord, SourceFileRecord
 
 
 @pytest.fixture
@@ -30,7 +30,8 @@ def test_metadata_defines_complete_schema() -> None:
 
 
 def test_records_and_relationships_persist(session: Session) -> None:
-    run = ReconciliationRunRecord(status="RUNNING", started_at=datetime.now(UTC))
+    organization = OrganizationRecord(name="Model Organization", slug="model-organization")
+    run = ReconciliationRunRecord(organization=organization, status="RUNNING", started_at=datetime.now(UTC))
     run.source_files.append(SourceFileRecord(source_type="BANK_TRANSACTIONS", original_filename="bank.csv", content_type="text/csv", checksum_sha256="a" * 64, size_bytes=100, row_count=2))
     run.configuration = ConfigurationSnapshotRecord(amount_tolerance=Decimal("0.50"), date_tolerance_days=2, settings={"priority": "exact"})
     run.results.append(ReconciliationResultRecord(external_result_id="RESULT-1", status="EXACT_MATCH", rule="exact", bank_source_record_ids=["BANK-1"], erp_invoice_ids=["INV-1"], explanation="Reference, currency, and amount matched."))
@@ -47,7 +48,8 @@ def test_records_and_relationships_persist(session: Session) -> None:
 
 
 def test_database_constraints_reject_invalid_status(session: Session) -> None:
-    session.add(ReconciliationRunRecord(status="UNKNOWN"))
+    organization = OrganizationRecord(name="Invalid Status Organization", slug="invalid-status-organization")
+    session.add(ReconciliationRunRecord(organization=organization, status="UNKNOWN"))
     with pytest.raises(IntegrityError):
         session.commit()
 

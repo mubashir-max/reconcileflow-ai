@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -72,4 +72,24 @@ def test_identity_database_can_add_and_remove_refresh_sessions(tmp_path: Path) -
     tables = inspect(engine).get_table_names()
     assert "refresh_tokens" not in tables
     assert "users" in tables
+    engine.dispose()
+
+
+def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:
+    database_path = tmp_path / "tenant-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+    command.upgrade(config, "e8f4c2a91d63")
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO reconciliation_runs (id, status) VALUES (:id, 'PENDING')"), {"id": "20000000000000000000000000000001"})
+    engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        organization_id = connection.scalar(text("SELECT organization_id FROM reconciliation_runs"))
+        legacy_slug = connection.scalar(text("SELECT slug FROM organizations WHERE id = :id"), {"id": organization_id})
+    assert organization_id is not None
+    assert legacy_slug == "legacy-workspace"
     engine.dispose()

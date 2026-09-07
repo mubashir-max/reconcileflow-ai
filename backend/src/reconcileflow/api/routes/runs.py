@@ -20,14 +20,14 @@ from ..run_schemas import (
     ReconciliationRunStatus,
 )
 from ..schemas import ErrorResponse
-from ..auth_dependencies import get_current_user
+from ..auth_dependencies import TenantContextDependency, get_tenant_context
 
 
 router = APIRouter(
     prefix="/reconciliation-runs",
     tags=["reconciliation runs"],
-    dependencies=[Depends(get_current_user)],
-    responses={401: {"model": ErrorResponse, "description": "A valid access token is required."}},
+    dependencies=[Depends(get_tenant_context)],
+    responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
 )
 ERROR_RESPONSES = {
     404: {"model": ErrorResponse, "description": "The reconciliation run does not exist."},
@@ -47,6 +47,7 @@ def _configuration_response(record) -> ReconciliationConfigurationResponse:
 def _run_response(run, configuration) -> ReconciliationRunResponse:
     return ReconciliationRunResponse(
         id=run.id,
+        organization_id=run.organization_id,
         status=run.status,
         configuration=_configuration_response(configuration),
         started_at=run.started_at,
@@ -65,14 +66,14 @@ def _run_response(run, configuration) -> ReconciliationRunResponse:
     summary="Create a reconciliation run",
     responses={409: ERROR_RESPONSES[409], 422: ERROR_RESPONSES[422]},
 )
-def create_reconciliation_run(request: CreateReconciliationRunRequest, session: SessionDependency) -> ReconciliationRunResponse:
+def create_reconciliation_run(request: CreateReconciliationRunRequest, session: SessionDependency, tenant: TenantContextDependency) -> ReconciliationRunResponse:
     domain_config = ReconciliationConfig(
         amount_tolerance=request.configuration.amount_tolerance,
         date_tolerance_days=request.configuration.date_tolerance_days,
         maximum_group_size=request.configuration.maximum_group_size,
     )
     with PersistenceUnitOfWork(session) as work:
-        run = work.runs.create()
+        run = work.runs.create(organization_id=tenant.organization_id)
         configuration = work.configurations.add(run.id, domain_config)
     return _run_response(run, configuration)
 
@@ -83,9 +84,9 @@ def create_reconciliation_run(request: CreateReconciliationRunRequest, session: 
     summary="Get a reconciliation run",
     responses={404: ERROR_RESPONSES[404], 422: ERROR_RESPONSES[422]},
 )
-def get_reconciliation_run(run_id: uuid.UUID, session: SessionDependency) -> ReconciliationRunResponse:
+def get_reconciliation_run(run_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency) -> ReconciliationRunResponse:
     work = PersistenceUnitOfWork(session)
-    run = work.runs.get(run_id)
+    run = work.runs.get(run_id, organization_id=tenant.organization_id)
     configuration = work.configurations.get_for_run(run_id)
     return _run_response(run, configuration)
 
@@ -98,17 +99,19 @@ def get_reconciliation_run(run_id: uuid.UUID, session: SessionDependency) -> Rec
 )
 def list_reconciliation_runs(
     session: SessionDependency,
+    tenant: TenantContextDependency,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     run_status: Annotated[ReconciliationRunStatus | None, Query(alias="status")] = None,
 ) -> ReconciliationRunListResponse:
     work = PersistenceUnitOfWork(session)
     status_value = run_status.value if run_status is not None else None
-    records = work.runs.list(page=Page(limit=limit, offset=offset), status=status_value)
+    records = work.runs.list(organization_id=tenant.organization_id, page=Page(limit=limit, offset=offset), status=status_value)
     return ReconciliationRunListResponse(
         items=[
             ReconciliationRunListItem(
                 id=record.id,
+                organization_id=record.organization_id,
                 status=record.status,
                 started_at=record.started_at,
                 finished_at=record.finished_at,
@@ -117,7 +120,7 @@ def list_reconciliation_runs(
             )
             for record in records
         ],
-        total=work.runs.count(status=status_value),
+        total=work.runs.count(organization_id=tenant.organization_id, status=status_value),
         limit=limit,
         offset=offset,
     )

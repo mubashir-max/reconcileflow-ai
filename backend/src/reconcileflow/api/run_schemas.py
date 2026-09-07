@@ -39,6 +39,7 @@ class ReconciliationConfigurationResponse(StrictModel):
 
 class ReconciliationRunResponse(StrictModel):
     id: uuid.UUID
+    organization_id: uuid.UUID
     status: ReconciliationRunStatus
     configuration: ReconciliationConfigurationResponse
     started_at: datetime | None
@@ -51,6 +52,7 @@ class ReconciliationRunResponse(StrictModel):
 
 class ReconciliationRunListItem(StrictModel):
     id: uuid.UUID
+    organization_id: uuid.UUID
     status: ReconciliationRunStatus
     started_at: datetime | None
     finished_at: datetime | None
