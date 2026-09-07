@@ -92,11 +92,19 @@ class UserRepository:
     def get_by_email(self, email: str) -> UserRecord | None:
         return self._session.scalar(select(UserRecord).where(UserRecord.email == email))
 
-    def get(self, user_id: uuid.UUID) -> UserRecord | None:
-        return self._session.get(UserRecord, user_id)
+    def get(self, user_id: uuid.UUID, *, lock: bool = False) -> UserRecord | None:
+        statement = select(UserRecord).where(UserRecord.id == user_id)
+        if lock:
+            statement = statement.with_for_update()
+        return self._session.scalar(statement)
 
     def email_exists(self, email: str) -> bool:
         return self._session.scalar(select(UserRecord.id).where(UserRecord.email == email)) is not None
+
+    def update_password(self, record: UserRecord, password_hash: str) -> UserRecord:
+        record.password_hash = password_hash
+        self._session.flush()
+        return record
 
 
 class OrganizationMembershipRepository:
@@ -241,6 +249,19 @@ class RefreshTokenRepository:
         records = list(self._session.scalars(
             select(RefreshTokenRecord).where(
                 RefreshTokenRecord.family_id == family_id,
+                RefreshTokenRecord.revoked_at.is_(None),
+            ).with_for_update()
+        ))
+        revoked_at = _utc(at)
+        for record in records:
+            record.revoked_at = revoked_at
+        self._session.flush()
+        return len(records)
+
+    def revoke_all_for_user(self, user_id: uuid.UUID, *, at: datetime) -> int:
+        records = list(self._session.scalars(
+            select(RefreshTokenRecord).where(
+                RefreshTokenRecord.user_id == user_id,
                 RefreshTokenRecord.revoked_at.is_(None),
             ).with_for_update()
         ))

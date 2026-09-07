@@ -14,6 +14,7 @@ from reconcileflow.auth import TokenValidationError
 
 from ..auth_dependencies import CurrentUserDependency, PasswordManagerDependency, TokenManagerDependency
 from ..auth_schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
     CurrentUserResponse,
@@ -284,3 +285,61 @@ def current_user(user: CurrentUserDependency, session: SessionDependency) -> Cur
         user=_user_response(user),
         memberships=[_membership_response(item) for item in memberships],
     )
+
+
+def _active_memberships(work: PersistenceUnitOfWork, user_id: uuid.UUID):
+    return [
+        item for item in work.memberships.list_for_user(user_id)
+        if item.is_active and item.organization.is_active
+    ]
+
+
+@router.post(
+    "/change-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Change the authenticated user's password",
+    description="Requires the current password, stores only a new hash, and revokes every refresh-token session.",
+    responses={401: ERROR_RESPONSES[401], 409: {"model": ErrorResponse}, 422: ERROR_RESPONSES[422]},
+)
+def change_password(
+    request: ChangePasswordRequest,
+    user: CurrentUserDependency,
+    session: SessionDependency,
+    passwords: PasswordManagerDependency,
+) -> None:
+    work = PersistenceUnitOfWork(session)
+    with work:
+        stored_user = work.users.get(user.id, lock=True)
+        if stored_user is None or not passwords.verify(request.current_password, stored_user.password_hash):
+            raise APIError(status_code=401, code="INVALID_CURRENT_PASSWORD", message="The current password is incorrect.")
+        if passwords.verify(request.new_password, stored_user.password_hash):
+            raise APIError(status_code=409, code="PASSWORD_REUSE", message="The new password must be different from the current password.")
+        work.users.update_password(stored_user, passwords.hash(request.new_password))
+        work.refresh_tokens.revoke_all_for_user(user.id, at=_now())
+        for membership in _active_memberships(work, user.id):
+            work.security_audit_events.append(
+                organization_id=membership.organization_id,
+                actor_user_id=user.id,
+                event_type="PASSWORD_CHANGED",
+                details={"all_refresh_sessions_revoked": True},
+            )
+
+
+@router.delete(
+    "/sessions",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke all refresh-token sessions",
+    description="Revokes every refresh-token session belonging to the authenticated user.",
+    responses={401: ERROR_RESPONSES[401]},
+)
+def revoke_all_sessions(user: CurrentUserDependency, session: SessionDependency) -> None:
+    work = PersistenceUnitOfWork(session)
+    with work:
+        revoked = work.refresh_tokens.revoke_all_for_user(user.id, at=_now())
+        for membership in _active_memberships(work, user.id):
+            work.security_audit_events.append(
+                organization_id=membership.organization_id,
+                actor_user_id=user.id,
+                event_type="ALL_SESSIONS_REVOKED",
+                details={"revoked_session_count": revoked},
+            )
