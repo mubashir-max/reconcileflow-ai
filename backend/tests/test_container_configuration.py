@@ -21,6 +21,7 @@ def test_container_starts_as_non_root_and_applies_migrations():
     assert "sed -i 's/\\r$//'" in dockerfile
     assert "alembic upgrade head" in entrypoint
     assert "exec uvicorn" in entrypoint
+    assert 'org.opencontainers.image.version="0.3.0"' in dockerfile
 
 
 def test_local_docker_secrets_file_is_ignored():
