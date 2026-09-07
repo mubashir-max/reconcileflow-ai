@@ -16,6 +16,7 @@ from .repositories import (
     ReconciliationResultRepository,
     ReconciliationRunRepository,
     RefreshTokenRepository,
+    SecurityAuditEventRepository,
     SourceFileRepository,
     UserRepository,
 )
@@ -35,6 +36,7 @@ class PersistenceUnitOfWork:
         self.users = UserRepository(session)
         self.memberships = OrganizationMembershipRepository(session)
         self.refresh_tokens = RefreshTokenRepository(session)
+        self.security_audit_events = SecurityAuditEventRepository(session)
         self._active = False
 
     def __enter__(self) -> PersistenceUnitOfWork:

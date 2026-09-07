@@ -92,6 +92,12 @@ def add_member(organization_id: uuid.UUID, request: AddOrganizationMemberRequest
             organization_id=organization_id, user_id=user.id, role=request.role.value
         )
         membership.user = user
+        work.security_audit_events.append(
+            organization_id=organization_id,
+            actor_user_id=manager.user_id,
+            event_type="MEMBERSHIP_CREATED",
+            details={"membership_id": str(membership.id), "subject_user_id": str(user.id), "role": membership.role},
+        )
     return _response(membership)
 
 
@@ -109,7 +115,14 @@ def update_member(organization_id: uuid.UUID, membership_id: uuid.UUID, request:
         _ensure_admin_can_manage(manager, membership.role, request.role.value)
         if membership.role == "OWNER" and request.role.value != "OWNER" and work.memberships.count_active_owners(organization_id) <= 1:
             raise APIError(status_code=409, code="FINAL_OWNER_REQUIRED", message="The final active owner cannot be demoted.")
+        previous_role = membership.role
         work.memberships.set_role(membership, request.role.value)
+        work.security_audit_events.append(
+            organization_id=organization_id,
+            actor_user_id=manager.user_id,
+            event_type="MEMBERSHIP_ROLE_CHANGED",
+            details={"membership_id": str(membership.id), "subject_user_id": str(membership.user_id), "previous_role": previous_role, "new_role": membership.role},
+        )
     return _response(membership)
 
 
@@ -130,4 +143,10 @@ def deactivate_member(organization_id: uuid.UUID, membership_id: uuid.UUID, sess
         if membership.role == "OWNER" and work.memberships.count_active_owners(organization_id) <= 1:
             raise APIError(status_code=409, code="FINAL_OWNER_REQUIRED", message="The final active owner cannot be removed.")
         work.memberships.deactivate(membership)
+        work.security_audit_events.append(
+            organization_id=organization_id,
+            actor_user_id=manager.user_id,
+            event_type="MEMBERSHIP_DEACTIVATED",
+            details={"membership_id": str(membership.id), "subject_user_id": str(membership.user_id), "role": membership.role},
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

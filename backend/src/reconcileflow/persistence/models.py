@@ -250,3 +250,26 @@ class AuditEventRecord(Base):
     details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     run: Mapped[ReconciliationRunRecord] = relationship(back_populates="audit_events")
+
+
+class SecurityAuditEventRecord(Base):
+    """Append-only, tenant-scoped security event without credential material."""
+
+    __tablename__ = "security_audit_events"
+    __table_args__ = (
+        Index("ix_security_audit_events_organization_occurred_at", "organization_id", "occurred_at"),
+        Index("ix_security_audit_events_actor_occurred_at", "actor_user_id", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)

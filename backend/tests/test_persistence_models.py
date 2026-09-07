@@ -25,7 +25,7 @@ def test_metadata_defines_complete_schema() -> None:
     assert set(Base.metadata.tables) == {
         "audit_events", "configuration_snapshots", "reconciliation_results",
         "reconciliation_runs", "source_files", "organizations",
-        "organization_memberships", "users", "refresh_tokens",
+        "organization_memberships", "users", "refresh_tokens", "security_audit_events",
     }
 
 

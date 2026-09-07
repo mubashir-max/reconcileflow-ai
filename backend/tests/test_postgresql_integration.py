@@ -48,6 +48,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "organization_memberships",
             "users",
             "refresh_tokens",
+            "security_audit_events",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
 
@@ -82,6 +83,9 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             organization_updated = await client.patch(
                 f"/api/v1/organizations/{organization_id}",
                 json={"name": "Updated Integration Organization"},
+            )
+            security_audit = await client.get(
+                f"/api/v1/organizations/{organization_id}/security-audit-events"
             )
             secondary_email = f"member-{uuid.uuid4().hex}@example.com"
             secondary = await client.post("/api/v1/auth/register", json={
@@ -144,6 +148,10 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert organization_updated.json()["name"] == "Updated Integration Organization"
         assert organization_updated.json()["id"] == organization_profile.json()["id"]
         assert organization_updated.json()["slug"] == organization_profile.json()["slug"]
+        assert security_audit.status_code == 200
+        assert {item["event_type"] for item in security_audit.json()["items"]} >= {
+            "USER_REGISTERED", "USER_LOGGED_IN", "ORGANIZATION_PROFILE_UPDATED"
+        }
         assert secondary.status_code == member_added.status_code == 201
         assert member_updated.status_code == 200
         assert member_updated.json()["role"] == "ANALYST"

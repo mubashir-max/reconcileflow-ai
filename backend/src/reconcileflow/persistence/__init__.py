@@ -13,6 +13,7 @@ from .models import (
     ReconciliationResultRecord,
     ReconciliationRunRecord,
     RefreshTokenRecord,
+    SecurityAuditEventRecord,
     SourceFileRecord,
     UserRecord,
 )
@@ -25,6 +26,7 @@ from .repositories import (
     ReconciliationResultRepository,
     ReconciliationRunRepository,
     RefreshTokenRepository,
+    SecurityAuditEventRepository,
     SourceFileRepository,
     UserRepository,
 )
@@ -55,6 +57,8 @@ __all__ = [
     "ReconciliationRunRepository",
     "RefreshTokenRecord",
     "RefreshTokenRepository",
+    "SecurityAuditEventRecord",
+    "SecurityAuditEventRepository",
     "SessionDependency",
     "SourceFileRecord",
     "SourceFileRepository",

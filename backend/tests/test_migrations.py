@@ -26,6 +26,7 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path) -> None:
         "alembic_version", "audit_events", "configuration_snapshots",
         "reconciliation_results", "reconciliation_runs", "source_files",
         "organizations", "organization_memberships", "users", "refresh_tokens",
+        "security_audit_events",
     }
     engine.dispose()
 
@@ -72,6 +73,23 @@ def test_identity_database_can_add_and_remove_refresh_sessions(tmp_path: Path) -
     tables = inspect(engine).get_table_names()
     assert "refresh_tokens" not in tables
     assert "users" in tables
+    engine.dispose()
+
+
+def test_token_database_can_add_and_remove_security_audit_events(tmp_path: Path) -> None:
+    database_path = tmp_path / "security-audit-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+
+    command.upgrade(config, "e8f4c2a91d63")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    assert "security_audit_events" in inspect(engine).get_table_names()
+    engine.dispose()
+
+    command.downgrade(config, "e8f4c2a91d63")
+    engine = create_engine(database_url)
+    assert "security_audit_events" not in inspect(engine).get_table_names()
     engine.dispose()
 
 
