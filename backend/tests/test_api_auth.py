@@ -182,9 +182,12 @@ async def test_missing_modified_and_wrong_type_access_tokens_are_rejected(auth_a
         })
         access = login.json()["access_token"]
         refresh = login.json()["refresh_token"]
+        header, payload, signature = access.split(".")
+        replacement = "A" if signature[0] != "A" else "B"
+        modified_access = ".".join((header, payload, replacement + signature[1:]))
         responses = [
             await client.get("/api/v1/auth/me"),
-            await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access[:-1]}x"}),
+            await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {modified_access}"}),
             await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {refresh}"}),
         ]
 
