@@ -4,6 +4,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from reconcileflow.api import APISettings, create_app
+from reconcileflow.api.auth_dependencies import get_current_user
 from reconcileflow.persistence import Base
 
 
@@ -24,6 +25,7 @@ def execution_app(tmp_path):
         _env_file=None,
     ))
     Base.metadata.create_all(app.state.database.engine)
+    app.dependency_overrides[get_current_user] = lambda: object()
     yield app
     app.state.database.dispose()
 

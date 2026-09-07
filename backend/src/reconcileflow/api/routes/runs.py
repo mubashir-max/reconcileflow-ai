@@ -6,7 +6,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from reconcileflow.persistence import Page, PersistenceUnitOfWork, SessionDependency
 from reconcileflow.reconciliation import ReconciliationConfig
@@ -20,9 +20,15 @@ from ..run_schemas import (
     ReconciliationRunStatus,
 )
 from ..schemas import ErrorResponse
+from ..auth_dependencies import get_current_user
 
 
-router = APIRouter(prefix="/reconciliation-runs", tags=["reconciliation runs"])
+router = APIRouter(
+    prefix="/reconciliation-runs",
+    tags=["reconciliation runs"],
+    dependencies=[Depends(get_current_user)],
+    responses={401: {"model": ErrorResponse, "description": "A valid access token is required."}},
+)
 ERROR_RESPONSES = {
     404: {"model": ErrorResponse, "description": "The reconciliation run does not exist."},
     409: {"model": ErrorResponse, "description": "The request conflicts with persisted data."},

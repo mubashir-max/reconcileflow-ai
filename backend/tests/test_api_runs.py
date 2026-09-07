@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from reconcileflow.api import APISettings, create_app
+from reconcileflow.api.auth_dependencies import get_current_user
 from reconcileflow.persistence import Base, ConfigurationSnapshotRepository, PersistenceConflictError, PersistenceUnitOfWork, ReconciliationRunRecord
 
 
@@ -20,6 +21,7 @@ def run_app(tmp_path):
     database_url = f"sqlite+pysqlite:///{(tmp_path / 'api-runs.db').as_posix()}"
     app = create_app(APISettings(environment="test", database_url=database_url, _env_file=None))
     Base.metadata.create_all(app.state.database.engine)
+    app.dependency_overrides[get_current_user] = lambda: object()
     yield app
     app.state.database.dispose()
 

@@ -73,6 +73,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             logged_out = await client.post(
                 "/api/v1/auth/logout", json={"refresh_token": refreshed.json()["refresh_token"]}
             )
+            client.headers["Authorization"] = f"Bearer {access_token}"
             created = await client.post("/api/v1/reconciliation-runs", json={})
             run_id = created.json()["id"]
             for source_type, filename in (

@@ -6,7 +6,7 @@ import uuid
 from collections import Counter
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from reconcileflow.audit import AuditTrail
 from reconcileflow.audit import AuditEventType
@@ -15,12 +15,17 @@ from reconcileflow.persistence import Page, PersistenceUnitOfWork, SessionDepend
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationEngine
 
 from ..errors import APIError
+from ..auth_dependencies import get_current_user
 from ..execution_schemas import AuditEventListResponse, AuditEventResponse, ExecutionResponse, ReconciliationResultStatus, ResultListResponse, ResultResponse
 from ..schemas import ErrorResponse
 from ..storage_dependencies import FileStorageDependency
 
 
-router = APIRouter(tags=["reconciliation execution"])
+router = APIRouter(
+    tags=["reconciliation execution"],
+    dependencies=[Depends(get_current_user)],
+    responses={401: {"model": ErrorResponse, "description": "A valid access token is required."}},
+)
 ERROR_RESPONSES = {404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 
 

@@ -7,7 +7,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from reconcileflow.auth import PasswordManager, TokenManager, TokenValidationError
-from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency, UserRecord
+from reconcileflow.persistence import DatabaseDependency, PersistenceUnitOfWork, UserRecord
 
 from .errors import APIError
 
@@ -41,7 +41,7 @@ BearerCredentials = Annotated[HTTPAuthorizationCredentials | None, Depends(_bear
 def get_current_user(
     credentials: BearerCredentials,
     tokens: TokenManagerDependency,
-    session: SessionDependency,
+    database: DatabaseDependency,
 ) -> UserRecord:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise APIError(status_code=401, code="INVALID_ACCESS_TOKEN", message="A valid access token is required.")
@@ -49,10 +49,12 @@ def get_current_user(
         claims = tokens.decode_access(credentials.credentials)
     except TokenValidationError as error:
         raise APIError(status_code=401, code="INVALID_ACCESS_TOKEN", message="A valid access token is required.") from error
-    user = PersistenceUnitOfWork(session).users.get(claims.subject)
-    if user is None or not user.is_active:
-        raise APIError(status_code=401, code="INVALID_ACCESS_TOKEN", message="A valid access token is required.")
-    return user
+    with database.session() as session:
+        user = PersistenceUnitOfWork(session).users.get(claims.subject)
+        if user is None or not user.is_active:
+            raise APIError(status_code=401, code="INVALID_ACCESS_TOKEN", message="A valid access token is required.")
+        session.expunge(user)
+        return user
 
 
 CurrentUserDependency = Annotated[UserRecord, Depends(get_current_user)]
