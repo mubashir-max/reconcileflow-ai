@@ -288,6 +288,9 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `GET /api/v1/reconciliation-runs/{run_id}/files` | List uploaded-file metadata for a run. |
 | `GET /api/v1/files/{file_id}` | Retrieve one file's safe metadata. |
 | `POST /api/v1/reconciliation-runs/{run_id}/execute` | Queue a pending run for background execution. |
+| `GET /api/v1/background-jobs` | List organization jobs with pagination and status filtering. |
+| `GET /api/v1/background-jobs/{job_id}` | Retrieve safe job progress and lifecycle details. |
+| `POST /api/v1/background-jobs/{job_id}/cancel` | Cancel a queued job or request cancellation of a running job. |
 | `GET /api/v1/reconciliation-runs/{run_id}/results` | List and filter persisted results. |
 | `GET /api/v1/results/{result_id}` | Retrieve one explainable result. |
 | `GET /api/v1/reconciliation-runs/{run_id}/audit-events` | Retrieve ordered audit events. |
@@ -305,9 +308,9 @@ The easiest way to learn the workflow is through `/docs`: open each endpoint, se
 7. Upload `data/sample/erp_invoices.csv` as `ERP_INVOICES`.
 8. Optionally upload `data/sample/gateway_settlements.csv` as `GATEWAY_SETTLEMENTS`.
 9. Queue the run for execution and retain the returned background-job ID.
-10. Poll the run until it reaches `SUCCEEDED` or `FAILED`, then retrieve its results and audit events.
+10. Poll the returned background-job ID until it reaches a terminal state, then retrieve the run results and audit events.
 
-Bank and ERP inputs are required. One file of each source type is allowed per pending run. The execution endpoint returns HTTP `202 Accepted`; reconciliation runs in the separate worker process. Duplicate jobs are rejected. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
+Bank and ERP inputs are required. One file of each source type is allowed per pending run. The execution endpoint returns HTTP `202 Accepted`; reconciliation runs in the separate worker process. Duplicate jobs are rejected. Job responses intentionally omit worker identities, heartbeats, storage paths, and raw exceptions. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
 
 Docker Compose starts the worker automatically. For a directly installed development environment, run it separately:
 
