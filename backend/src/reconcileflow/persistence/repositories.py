@@ -423,6 +423,19 @@ class BackgroundJobRepository:
             raise RecordNotFoundError(f"background job {job_id} was not found")
         return record
 
+    def get_for_run(
+        self,
+        run_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+    ) -> BackgroundJobRecord | None:
+        return self._session.scalar(
+            select(BackgroundJobRecord).where(
+                BackgroundJobRecord.run_id == run_id,
+                BackgroundJobRecord.organization_id == organization_id,
+            )
+        )
+
     def list(
         self,
         *,

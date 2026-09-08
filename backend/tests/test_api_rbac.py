@@ -85,7 +85,8 @@ async def test_operator_roles_can_create_upload_execute_and_read(rbac_app, role)
         executed = await client.post(f"/api/v1/reconciliation-runs/{run_id}/execute", headers=headers)
         retrieved = await client.get(f"/api/v1/reconciliation-runs/{run_id}", headers=headers)
     assert created.status_code == bank.status_code == erp.status_code == 201
-    assert executed.status_code == retrieved.status_code == 200
+    assert executed.status_code == 202
+    assert retrieved.status_code == 200
 
 
 @pytest.mark.anyio

@@ -90,6 +90,7 @@ class BackgroundWorker:
         poll_interval_seconds: float = 2.0,
         stale_timeout_seconds: int = 300,
         retry_delay_seconds: int = 30,
+        organization_id: uuid.UUID | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         worker_id = worker_id.strip()
@@ -107,6 +108,7 @@ class BackgroundWorker:
         self._poll_interval_seconds = poll_interval_seconds
         self._stale_timeout = timedelta(seconds=stale_timeout_seconds)
         self._retry_delay = timedelta(seconds=retry_delay_seconds)
+        self._organization_id = organization_id
         self._clock = clock or (lambda: datetime.now(UTC))
         self._context = WorkerContext(session_provider, worker_id)
 
@@ -122,6 +124,7 @@ class BackgroundWorker:
                 record = work.background_jobs.claim_next(
                     worker_id=self._worker_id,
                     at=now,
+                    organization_id=self._organization_id,
                 )
                 job = None if record is None else WorkerJob(
                     id=record.id,

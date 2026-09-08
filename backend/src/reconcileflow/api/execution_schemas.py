@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
+from typing import Literal
 
 from pydantic import Field
 
@@ -26,6 +27,12 @@ class ExecutionResponse(StrictModel):
     status: ReconciliationRunStatus
     result_count: int = Field(ge=0)
     results_requiring_review: int = Field(ge=0)
+
+
+class ExecutionAcceptedResponse(StrictModel):
+    job_id: uuid.UUID
+    run_id: uuid.UUID
+    status: Literal["QUEUED"]
 
 
 class ResultResponse(StrictModel):
