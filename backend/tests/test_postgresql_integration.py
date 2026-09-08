@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -13,6 +12,7 @@ from sqlalchemy import inspect, select
 
 from reconcileflow.api import APISettings, create_app
 from reconcileflow.persistence import OrganizationMembershipRecord, PersistenceUnitOfWork
+from reconcileflow.worker import BackgroundWorker, ReconciliationJobProcessor
 
 
 DATABASE_URL = os.getenv("RECONCILEFLOW_TEST_POSTGRESQL_URL")
@@ -135,20 +135,19 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                 )
                 assert uploaded.status_code == 201
             executed = await client.post(f"/api/v1/reconciliation-runs/{run_id}/execute")
+            integration_worker = BackgroundWorker(
+                session_provider=app.state.database.session,
+                processor=ReconciliationJobProcessor(
+                    session_provider=app.state.database.session,
+                    storage=app.state.file_storage,
+                ),
+                worker_id="postgresql-integration-worker",
+                organization_id=uuid.UUID(organization_id),
+            )
+            assert integration_worker.run_once() is True
             results = await client.get(f"/api/v1/reconciliation-runs/{run_id}/results")
             audit = await client.get(f"/api/v1/reconciliation-runs/{run_id}/audit-events")
             with app.state.database.session() as session:
-                with PersistenceUnitOfWork(session) as work:
-                    background_job = work.background_jobs.create(
-                        organization_id=uuid.UUID(organization_id),
-                        run_id=uuid.UUID(run_id),
-                        scheduled_at=datetime.now(UTC),
-                    )
-                with PersistenceUnitOfWork(session) as work:
-                    claimed_job = work.background_jobs.claim_next(
-                        worker_id="postgresql-integration-worker",
-                        organization_id=uuid.UUID(organization_id)
-                    )
                 membership = session.scalar(
                     select(OrganizationMembershipRecord).where(
                         OrganizationMembershipRecord.organization_id == uuid.UUID(
@@ -217,13 +216,10 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert member_updated.json()["role"] == "ANALYST"
         assert member_removed.status_code == 204
         assert created.status_code == 201
-        assert executed.status_code == 200
-        assert executed.json()["status"] == "SUCCEEDED"
+        assert executed.status_code == 202
+        assert executed.json()["status"] == "QUEUED"
         assert results.json()["total"] == 8
         assert audit.json()["items"][-1]["event_type"] == "RUN_SUCCEEDED"
-        assert claimed_job.id == background_job.id
-        assert claimed_job.status == "RUNNING"
-        assert claimed_job.attempt_count == 1
         assert viewer_write.status_code == 403
         assert viewer_write.json()["error"]["code"] == "INSUFFICIENT_ROLE"
         assert viewer_read.status_code == 200

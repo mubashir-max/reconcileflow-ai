@@ -8,12 +8,10 @@ import threading
 
 from reconcileflow.api.config import APISettings
 from reconcileflow.persistence import Database
+from reconcileflow.storage import LocalFileStorage
 
-from .service import BackgroundWorker, WorkerContext, WorkerJob
-
-
-def _pending_processor(_job: WorkerJob, _context: WorkerContext) -> None:
-    raise RuntimeError("reconciliation processor is not configured")
+from .reconciliation import ReconciliationJobProcessor
+from .service import BackgroundWorker
 
 
 def main() -> None:
@@ -32,7 +30,12 @@ def main() -> None:
     signal.signal(signal.SIGTERM, request_shutdown)
     worker = BackgroundWorker(
         session_provider=database.session,
-        processor=_pending_processor,
+        processor=ReconciliationJobProcessor(
+            session_provider=database.session,
+            storage=LocalFileStorage(
+                settings.upload_directory, settings.max_upload_size_bytes
+            ),
+        ),
         worker_id=settings.worker_id,
         poll_interval_seconds=settings.worker_poll_interval_seconds,
         stale_timeout_seconds=settings.worker_stale_timeout_seconds,

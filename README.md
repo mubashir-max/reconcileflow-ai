@@ -287,7 +287,7 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `POST /api/v1/reconciliation-runs/{run_id}/files` | Upload one bank, ERP, or gateway source file. |
 | `GET /api/v1/reconciliation-runs/{run_id}/files` | List uploaded-file metadata for a run. |
 | `GET /api/v1/files/{file_id}` | Retrieve one file's safe metadata. |
-| `POST /api/v1/reconciliation-runs/{run_id}/execute` | Execute a pending run synchronously. |
+| `POST /api/v1/reconciliation-runs/{run_id}/execute` | Queue a pending run for background execution. |
 | `GET /api/v1/reconciliation-runs/{run_id}/results` | List and filter persisted results. |
 | `GET /api/v1/results/{result_id}` | Retrieve one explainable result. |
 | `GET /api/v1/reconciliation-runs/{run_id}/audit-events` | Retrieve ordered audit events. |
@@ -304,9 +304,16 @@ The easiest way to learn the workflow is through `/docs`: open each endpoint, se
 6. Upload `data/sample/bank_transactions.csv` as `BANK_TRANSACTIONS`.
 7. Upload `data/sample/erp_invoices.csv` as `ERP_INVOICES`.
 8. Optionally upload `data/sample/gateway_settlements.csv` as `GATEWAY_SETTLEMENTS`.
-9. Execute the run, then retrieve its results and audit events.
+9. Queue the run for execution and retain the returned background-job ID.
+10. Poll the run until it reaches `SUCCEEDED` or `FAILED`, then retrieve its results and audit events.
 
-Bank and ERP inputs are required. One file of each source type is allowed per pending run. A succeeded or failed run cannot execute again. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
+Bank and ERP inputs are required. One file of each source type is allowed per pending run. The execution endpoint returns HTTP `202 Accepted`; reconciliation runs in the separate worker process. Duplicate jobs are rejected. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
+
+Docker Compose starts the worker automatically. For a directly installed development environment, run it separately:
+
+```powershell
+python -m reconcileflow.worker
+```
 
 ### Database migrations
 
@@ -336,7 +343,6 @@ Version 0.3 is a secure multi-tenant backend foundation, not yet a deployed end-
 - Email verification or password-reset email delivery
 - Microsoft, Google, or other external OAuth login
 - CAPTCHA or distributed rate limiting across multiple API instances
-- Background job queues or asynchronous reconciliation execution
 - Cloud object storage
 - Web, Android, or iOS interfaces
 - Human approval and override screens
