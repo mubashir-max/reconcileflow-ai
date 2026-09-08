@@ -1,6 +1,7 @@
 """Tenant-scoped background-job monitoring and cancellation endpoints."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
@@ -24,6 +25,14 @@ ERROR_RESPONSES = {
 }
 
 
+def _utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _response(record) -> BackgroundJobResponse:
     return BackgroundJobResponse(
         id=record.id,
@@ -36,13 +45,13 @@ def _response(record) -> BackgroundJobResponse:
         max_attempts=record.max_attempts,
         failure_code=record.failure_code,
         failure_message=record.failure_message,
-        scheduled_at=record.scheduled_at,
-        started_at=record.started_at,
-        completed_at=record.completed_at,
-        cancellation_requested_at=record.cancellation_requested_at,
-        retry_at=record.retry_at,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
+        scheduled_at=_utc(record.scheduled_at),
+        started_at=_utc(record.started_at),
+        completed_at=_utc(record.completed_at),
+        cancellation_requested_at=_utc(record.cancellation_requested_at),
+        retry_at=_utc(record.retry_at),
+        created_at=_utc(record.created_at),
+        updated_at=_utc(record.updated_at),
     )
 
 

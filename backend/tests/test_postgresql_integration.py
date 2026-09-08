@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -134,7 +135,11 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                     files={"file": (filename, (SAMPLES / filename).read_bytes(), "application/octet-stream")},
                 )
                 assert uploaded.status_code == 201
-            executed = await client.post(f"/api/v1/reconciliation-runs/{run_id}/execute")
+            scheduled_at = datetime.now(UTC) + timedelta(seconds=1)
+            executed = await client.post(
+                f"/api/v1/reconciliation-runs/{run_id}/execute",
+                json={"scheduled_at": scheduled_at.isoformat()},
+            )
             integration_worker = BackgroundWorker(
                 session_provider=app.state.database.session,
                 processor=ReconciliationJobProcessor(
@@ -143,6 +148,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                 ),
                 worker_id="postgresql-integration-worker",
                 organization_id=uuid.UUID(organization_id),
+                clock=lambda: scheduled_at + timedelta(seconds=1),
             )
             assert integration_worker.run_once() is True
             results = await client.get(f"/api/v1/reconciliation-runs/{run_id}/results")
@@ -241,6 +247,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert created.status_code == 201
         assert executed.status_code == 202
         assert executed.json()["status"] == "QUEUED"
+        assert datetime.fromisoformat(executed.json()["scheduled_at"]) == scheduled_at
         assert results.json()["total"] == 8
         assert audit.json()["items"][-1]["event_type"] == "RUN_SUCCEEDED"
         assert viewer_write.status_code == 403

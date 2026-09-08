@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Any
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from .run_schemas import ReconciliationRunStatus, StrictModel
 
@@ -33,6 +33,18 @@ class ExecutionAcceptedResponse(StrictModel):
     job_id: uuid.UUID
     run_id: uuid.UUID
     status: Literal["QUEUED"]
+    scheduled_at: datetime
+
+
+class ExecutionRequest(StrictModel):
+    scheduled_at: datetime | None = None
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def require_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("scheduled_at must include a timezone offset")
+        return value
 
 
 class ResultResponse(StrictModel):
