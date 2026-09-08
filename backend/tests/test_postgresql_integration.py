@@ -147,6 +147,23 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             assert integration_worker.run_once() is True
             results = await client.get(f"/api/v1/reconciliation-runs/{run_id}/results")
             audit = await client.get(f"/api/v1/reconciliation-runs/{run_id}/audit-events")
+            job_detail = await client.get(
+                f"/api/v1/background-jobs/{executed.json()['job_id']}"
+            )
+            jobs = await client.get("/api/v1/background-jobs?status=SUCCEEDED")
+            with app.state.database.session() as session:
+                with PersistenceUnitOfWork(session) as work:
+                    cancelled_run = work.runs.create(
+                        organization_id=uuid.UUID(organization_id)
+                    )
+                    cancellable_job = work.background_jobs.create(
+                        organization_id=uuid.UUID(organization_id),
+                        run_id=cancelled_run.id,
+                    )
+                    cancellable_job_id = cancellable_job.id
+            cancelled_job = await client.post(
+                f"/api/v1/background-jobs/{cancellable_job_id}/cancel"
+            )
             with app.state.database.session() as session:
                 membership = session.scalar(
                     select(OrganizationMembershipRecord).where(
@@ -186,6 +203,12 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
 
         assert ready.status_code == 200
         assert registered.status_code == 201
+        assert job_detail.status_code == 200
+        assert job_detail.json()["status"] == "SUCCEEDED"
+        assert jobs.status_code == 200
+        assert jobs.json()["total"] >= 1
+        assert cancelled_job.status_code == 200
+        assert cancelled_job.json()["status"] == "CANCELLED"
         assert registered.json()["membership"]["role"] == "OWNER"
         assert failed_login.status_code == 401
         assert failed_login.json()["error"]["code"] == "INVALID_CREDENTIALS"

@@ -454,6 +454,21 @@ class BackgroundJobRepository:
         ).limit(page.limit).offset(page.offset)
         return list(self._session.scalars(statement))
 
+    def count(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        status: BackgroundJobStatus | str | None = None,
+    ) -> int:
+        statement = select(func.count()).select_from(BackgroundJobRecord).where(
+            BackgroundJobRecord.organization_id == organization_id
+        )
+        if status is not None:
+            statement = statement.where(
+                BackgroundJobRecord.status == self._status_value(status)
+            )
+        return int(self._session.scalar(statement) or 0)
+
     def claim_next(
         self,
         *,
@@ -586,8 +601,15 @@ class BackgroundJobRepository:
             raise InvalidStatusTransitionError(
                 f"cannot cancel a {record.status} background job"
             )
-        record.status = BackgroundJobStatus.CANCEL_REQUESTED.value
-        record.cancellation_requested_at = _utc(at or datetime.now(UTC))
+        requested_at = _utc(at or datetime.now(UTC))
+        record.cancellation_requested_at = requested_at
+        if record.status == BackgroundJobStatus.QUEUED.value:
+            record.status = BackgroundJobStatus.CANCELLED.value
+            record.completed_at = requested_at
+            record.status_message = "Cancelled before processing"
+        else:
+            record.status = BackgroundJobStatus.CANCEL_REQUESTED.value
+            record.status_message = "Cancellation requested"
         self._session.flush()
         return record
 
