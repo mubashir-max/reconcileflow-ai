@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -11,7 +12,7 @@ from reconcileflow.persistence import Page, PersistenceUnitOfWork, SessionDepend
 
 from ..errors import APIError
 from ..auth_dependencies import ReconciliationOperatorDependency, TenantContextDependency, get_tenant_context
-from ..execution_schemas import AuditEventListResponse, AuditEventResponse, ExecutionAcceptedResponse, ReconciliationResultStatus, ResultListResponse, ResultResponse
+from ..execution_schemas import AuditEventListResponse, AuditEventResponse, ExecutionAcceptedResponse, ExecutionRequest, ReconciliationResultStatus, ResultListResponse, ResultResponse
 from ..schemas import ErrorResponse
 
 
@@ -39,7 +40,26 @@ def _audit(record) -> AuditEventResponse:
     summary="Execute a pending reconciliation run",
     description="Requires the OWNER, ADMIN, or ANALYST organization role.",
 )
-def execute_run(run_id: uuid.UUID, session: SessionDependency, tenant: ReconciliationOperatorDependency) -> ExecutionAcceptedResponse:
+def execute_run(
+    run_id: uuid.UUID,
+    session: SessionDependency,
+    tenant: ReconciliationOperatorDependency,
+    request: ExecutionRequest | None = None,
+) -> ExecutionAcceptedResponse:
+    now = datetime.now(UTC)
+    scheduled_at = request.scheduled_at.astimezone(UTC) if request and request.scheduled_at else now
+    if scheduled_at < now:
+        raise APIError(
+            status_code=422,
+            code="SCHEDULE_IN_PAST",
+            message="The execution schedule must not be in the past.",
+        )
+    if scheduled_at > now + timedelta(days=365):
+        raise APIError(
+            status_code=422,
+            code="SCHEDULE_TOO_DISTANT",
+            message="The execution schedule must be within 365 days.",
+        )
     with PersistenceUnitOfWork(session) as work:
         run = work.runs.get(run_id, organization_id=tenant.organization_id, lock=True)
         if run.status != "PENDING":
@@ -60,8 +80,14 @@ def execute_run(run_id: uuid.UUID, session: SessionDependency, tenant: Reconcili
         job = work.background_jobs.create(
             organization_id=tenant.organization_id,
             run_id=run_id,
+            scheduled_at=scheduled_at,
         )
-    return ExecutionAcceptedResponse(job_id=job.id, run_id=run_id, status="QUEUED")
+    return ExecutionAcceptedResponse(
+        job_id=job.id,
+        run_id=run_id,
+        status="QUEUED",
+        scheduled_at=job.scheduled_at,
+    )
 
 
 @router.get("/reconciliation-runs/{run_id}/results", response_model=ResultListResponse, responses=ERROR_RESPONSES, summary="List reconciliation results")

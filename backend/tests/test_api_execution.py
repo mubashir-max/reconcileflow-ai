@@ -135,6 +135,79 @@ async def test_run_cannot_be_queued_twice(execution_app):
 
 
 @pytest.mark.anyio
+async def test_future_execution_waits_until_scheduled_time(execution_app):
+    now = datetime.now(UTC)
+    scheduled_at = now + timedelta(hours=1)
+    async with AsyncClient(
+        transport=ASGITransport(app=execution_app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        run_id = await _create_run(client)
+        await _upload(client, run_id, "BANK_TRANSACTIONS", "bank_transactions.csv")
+        await _upload(client, run_id, "ERP_INVOICES", "erp_invoices.csv")
+        queued = await client.post(
+            f"/api/v1/reconciliation-runs/{run_id}/execute",
+            json={"scheduled_at": scheduled_at.isoformat()},
+        )
+        job = await client.get(f"/api/v1/background-jobs/{queued.json()['job_id']}")
+        before = _worker(execution_app, clock=lambda: now).run_once()
+        after = _worker(
+            execution_app, clock=lambda: scheduled_at + timedelta(seconds=1)
+        ).run_once()
+        run = await client.get(f"/api/v1/reconciliation-runs/{run_id}")
+
+    assert queued.status_code == 202
+    assert queued.json()["scheduled_at"] == job.json()["scheduled_at"]
+    assert datetime.fromisoformat(queued.json()["scheduled_at"]) == scheduled_at
+    assert before is False
+    assert after is True
+    assert run.json()["status"] == "SUCCEEDED"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("scheduled_at", "code"),
+    [
+        ((datetime.now(UTC) - timedelta(minutes=1)).isoformat(), "SCHEDULE_IN_PAST"),
+        ((datetime.now(UTC) + timedelta(days=366)).isoformat(), "SCHEDULE_TOO_DISTANT"),
+    ],
+)
+async def test_invalid_execution_schedules_are_rejected(
+    execution_app, scheduled_at, code
+):
+    async with AsyncClient(
+        transport=ASGITransport(app=execution_app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        run_id = await _create_run(client)
+        await _upload(client, run_id, "BANK_TRANSACTIONS", "bank_transactions.csv")
+        await _upload(client, run_id, "ERP_INVOICES", "erp_invoices.csv")
+        response = await client.post(
+            f"/api/v1/reconciliation-runs/{run_id}/execute",
+            json={"scheduled_at": scheduled_at},
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == code
+
+
+@pytest.mark.anyio
+async def test_naive_execution_schedule_is_rejected(execution_app):
+    async with AsyncClient(
+        transport=ASGITransport(app=execution_app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        run_id = await _create_run(client)
+        await _upload(client, run_id, "BANK_TRANSACTIONS", "bank_transactions.csv")
+        await _upload(client, run_id, "ERP_INVOICES", "erp_invoices.csv")
+        response = await client.post(
+            f"/api/v1/reconciliation-runs/{run_id}/execute",
+            json={"scheduled_at": "2030-01-01T12:00:00"},
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "REQUEST_VALIDATION_ERROR"
+
+
+@pytest.mark.anyio
 async def test_invalid_source_fails_safely_without_partial_results(execution_app):
     async with AsyncClient(transport=ASGITransport(app=execution_app, raise_app_exceptions=False), base_url="http://test") as client:
         run_id = await _create_run(client)
