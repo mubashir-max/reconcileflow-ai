@@ -153,6 +153,25 @@ def test_background_jobs_can_add_and_remove_worker_leases(tmp_path: Path) -> Non
     assert not {"claimed_by", "heartbeat_at"} & columns
     engine.dispose()
 
+
+def test_worker_leases_can_add_and_remove_manual_retry_tracking(tmp_path: Path) -> None:
+    database_path = tmp_path / "manual-retries-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+
+    command.upgrade(config, "e6f1c8b42a73")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("background_jobs")}
+    assert {"total_attempt_count", "manual_retry_count", "last_manual_retry_at"} <= columns
+    engine.dispose()
+
+    command.downgrade(config, "e6f1c8b42a73")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("background_jobs")}
+    assert not {"total_attempt_count", "manual_retry_count", "last_manual_retry_at"} & columns
+    engine.dispose()
+
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:
     database_path = tmp_path / "tenant-upgrade.db"
     database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"

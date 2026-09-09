@@ -171,6 +171,43 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                 f"/api/v1/background-jobs/{cancellable_job_id}/cancel"
             )
             with app.state.database.session() as session:
+                with PersistenceUnitOfWork(session) as work:
+                    retry_run = work.runs.create(
+                        organization_id=uuid.UUID(organization_id)
+                    )
+                    retry_job = work.background_jobs.create(
+                        organization_id=uuid.UUID(organization_id), run_id=retry_run.id
+                    )
+                    work.runs.transition(
+                        retry_run.id, "RUNNING", organization_id=uuid.UUID(organization_id)
+                    )
+                    work.background_jobs.claim_next(
+                        worker_id="retry-integration-worker",
+                        organization_id=uuid.UUID(organization_id),
+                    )
+                    work.runs.transition(
+                        retry_run.id,
+                        "FAILED",
+                        organization_id=uuid.UUID(organization_id),
+                        error_code="EXECUTION_FAILED",
+                        error_message="Reconciliation execution failed.",
+                    )
+                    work.background_jobs.complete(
+                        retry_job.id,
+                        "FAILED",
+                        organization_id=uuid.UUID(organization_id),
+                        failure_code="WORKER_PROCESSING_FAILED",
+                        failure_message="Background job processing failed.",
+                    )
+                    retry_job_id = retry_job.id
+            retried_job = await client.post(
+                f"/api/v1/background-jobs/{retry_job_id}/retry"
+            )
+            retry_audit = await client.get(
+                f"/api/v1/organizations/{organization_id}/security-audit-events"
+            )
+            await client.post(f"/api/v1/background-jobs/{retry_job_id}/cancel")
+            with app.state.database.session() as session:
                 membership = session.scalar(
                     select(OrganizationMembershipRecord).where(
                         OrganizationMembershipRecord.organization_id == uuid.UUID(
@@ -215,6 +252,13 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert jobs.json()["total"] >= 1
         assert cancelled_job.status_code == 200
         assert cancelled_job.json()["status"] == "CANCELLED"
+        assert retried_job.status_code == 200
+        assert retried_job.json()["status"] == "QUEUED"
+        assert retried_job.json()["total_attempt_count"] == 1
+        assert any(
+            item["event_type"] == "BACKGROUND_JOB_MANUAL_RETRY_REQUESTED"
+            for item in retry_audit.json()["items"]
+        )
         assert registered.json()["membership"]["role"] == "OWNER"
         assert failed_login.status_code == 401
         assert failed_login.json()["error"]["code"] == "INVALID_CREDENTIALS"
