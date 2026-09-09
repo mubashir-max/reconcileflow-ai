@@ -7,11 +7,12 @@ from httpx import ASGITransport, AsyncClient
 
 from reconcileflow.api import APISettings, create_app
 from reconcileflow.api.auth_dependencies import TenantContext, get_current_user, get_tenant_context
-from reconcileflow.persistence import Base, OrganizationRecord, PersistenceUnitOfWork
+from reconcileflow.persistence import Base, OrganizationRecord, PersistenceUnitOfWork, UserRecord
 
 
 ORG_ID = uuid.UUID("70000000-0000-0000-0000-000000000001")
 OTHER_ORG_ID = uuid.UUID("70000000-0000-0000-0000-000000000002")
+USER_ID = uuid.UUID("70000000-0000-0000-0000-000000000003")
 
 
 @pytest.fixture
@@ -30,10 +31,11 @@ def jobs_app(tmp_path):
     Base.metadata.create_all(app.state.database.engine)
     app.dependency_overrides[get_current_user] = lambda: object()
     app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
-        ORG_ID, uuid.uuid4(), "OWNER"
+        ORG_ID, USER_ID, "OWNER"
     )
     with app.state.database.session() as session:
         session.add_all([
+            UserRecord(id=USER_ID, email="jobs@example.com", password_hash="test-hash"),
             OrganizationRecord(id=ORG_ID, name="Jobs Organization", slug="jobs-organization"),
             OrganizationRecord(id=OTHER_ORG_ID, name="Other Organization", slug="other-organization"),
         ])
@@ -51,6 +53,31 @@ def _job(app, organization_id=ORG_ID):
             )
             job_id = job.id
     return job_id
+
+
+def _fail_job(app, job_id):
+    with app.state.database.session() as session:
+        with PersistenceUnitOfWork(session) as work:
+            job = work.background_jobs.get(job_id, organization_id=ORG_ID)
+            work.runs.transition(job.run_id, "RUNNING", organization_id=ORG_ID)
+            claimed = work.background_jobs.claim_next(
+                worker_id="failure-worker", organization_id=ORG_ID
+            )
+            assert claimed.id == job_id
+            work.runs.transition(
+                job.run_id,
+                "FAILED",
+                organization_id=ORG_ID,
+                error_code="EXECUTION_FAILED",
+                error_message="Reconciliation execution failed.",
+            )
+            work.background_jobs.complete(
+                job_id,
+                "FAILED",
+                organization_id=ORG_ID,
+                failure_code="WORKER_PROCESSING_FAILED",
+                failure_message="Background job processing failed.",
+            )
 
 
 @pytest.mark.anyio
@@ -143,3 +170,57 @@ def test_openapi_documents_job_monitoring_and_cancellation(jobs_app):
     assert "/api/v1/background-jobs/{job_id}" in paths
     operation = paths["/api/v1/background-jobs/{job_id}/cancel"]["post"]
     assert all(role in operation["description"] for role in ("OWNER", "ADMIN", "ANALYST"))
+
+
+@pytest.mark.anyio
+async def test_failed_job_can_be_retried_with_history_and_security_audit(jobs_app):
+    job_id = _job(jobs_app)
+    _fail_job(jobs_app, job_id)
+    async with AsyncClient(transport=ASGITransport(app=jobs_app), base_url="http://test") as client:
+        retried = await client.post(f"/api/v1/background-jobs/{job_id}/retry")
+        repeated = await client.post(f"/api/v1/background-jobs/{job_id}/retry")
+        detail = await client.get(f"/api/v1/background-jobs/{job_id}")
+    assert retried.status_code == 200
+    assert retried.json()["id"] == str(job_id)
+    assert retried.json()["status"] == "QUEUED"
+    assert retried.json()["attempt_count"] == 0
+    assert retried.json()["total_attempt_count"] == 1
+    assert retried.json()["manual_retry_count"] == 1
+    assert retried.json()["failure_code"] is None
+    assert detail.json()["last_manual_retry_at"] is not None
+    assert repeated.status_code == 409
+    assert repeated.json()["error"]["code"] == "JOB_NOT_RETRYABLE"
+    with jobs_app.state.database.session() as session:
+        work = PersistenceUnitOfWork(session)
+        job = work.background_jobs.get(job_id, organization_id=ORG_ID)
+        run = work.runs.get(job.run_id, organization_id=ORG_ID)
+        events = work.security_audit_events.list_for_organization(ORG_ID)
+    assert run.status == "PENDING"
+    assert events[0].event_type == "BACKGROUND_JOB_MANUAL_RETRY_REQUESTED"
+    assert set(events[0].details) == {"job_id", "run_id", "manual_retry_count"}
+
+
+@pytest.mark.anyio
+async def test_nonfailed_cross_tenant_and_viewer_retries_are_rejected(jobs_app):
+    queued = _job(jobs_app)
+    other = _job(jobs_app, OTHER_ORG_ID)
+    async with AsyncClient(transport=ASGITransport(app=jobs_app), base_url="http://test") as client:
+        conflict = await client.post(f"/api/v1/background-jobs/{queued}/retry")
+        hidden = await client.post(f"/api/v1/background-jobs/{other}/retry")
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "JOB_NOT_RETRYABLE"
+    assert hidden.status_code == 404
+
+    with jobs_app.state.database.session() as session:
+        with PersistenceUnitOfWork(session) as work:
+            work.background_jobs.request_cancellation(queued, organization_id=ORG_ID)
+
+    failed = _job(jobs_app)
+    _fail_job(jobs_app, failed)
+    jobs_app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        ORG_ID, USER_ID, "VIEWER"
+    )
+    async with AsyncClient(transport=ASGITransport(app=jobs_app), base_url="http://test") as client:
+        denied = await client.post(f"/api/v1/background-jobs/{failed}/retry")
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "INSUFFICIENT_ROLE"

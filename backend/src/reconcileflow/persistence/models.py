@@ -186,6 +186,8 @@ class BackgroundJobRecord(Base):
             name="valid_progress_percentage",
         ),
         CheckConstraint("attempt_count >= 0", name="nonnegative_attempt_count"),
+        CheckConstraint("total_attempt_count >= 0", name="nonnegative_total_attempt_count"),
+        CheckConstraint("manual_retry_count >= 0", name="nonnegative_manual_retry_count"),
         CheckConstraint("max_attempts >= 1", name="positive_max_attempts"),
         CheckConstraint("attempt_count <= max_attempts", name="attempts_within_limit"),
         CheckConstraint(
@@ -208,7 +210,10 @@ class BackgroundJobRecord(Base):
     progress_percentage: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status_message: Mapped[str | None] = mapped_column(String(500))
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    manual_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
+    last_manual_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

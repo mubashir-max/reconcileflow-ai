@@ -503,6 +503,7 @@ class BackgroundJobRepository:
             return None
         record.status = BackgroundJobStatus.RUNNING.value
         record.attempt_count += 1
+        record.total_attempt_count += 1
         record.started_at = claimed_at
         record.claimed_by = worker_id
         record.heartbeat_at = claimed_at
@@ -510,6 +511,60 @@ class BackgroundJobRepository:
         record.retry_at = None
         record.failure_code = None
         record.failure_message = None
+        self._session.flush()
+        return record
+
+    def retry_failed(
+        self,
+        job_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+        max_manual_retries: int,
+        at: datetime | None = None,
+    ) -> BackgroundJobRecord:
+        if isinstance(max_manual_retries, bool) or max_manual_retries < 1:
+            raise ValueError("max_manual_retries must be a positive integer")
+        record = self.get(job_id, organization_id=organization_id, lock=True)
+        if record.status != BackgroundJobStatus.FAILED.value:
+            raise InvalidStatusTransitionError("only failed background jobs can be retried")
+        if record.manual_retry_count >= max_manual_retries:
+            raise InvalidStatusTransitionError("manual retry limit has been reached")
+        if self._session.scalar(
+            select(func.count()).select_from(ReconciliationResultRecord).where(
+                ReconciliationResultRecord.run_id == record.run_id
+            )
+        ):
+            raise InvalidStatusTransitionError("jobs with persisted results cannot be retried")
+        run = self._session.scalar(
+            select(ReconciliationRunRecord).where(
+                ReconciliationRunRecord.id == record.run_id,
+                ReconciliationRunRecord.organization_id == organization_id,
+            ).with_for_update()
+        )
+        if run is None or run.status != "FAILED":
+            raise InvalidStatusTransitionError("the associated run is not retryable")
+
+        retried_at = _utc(at or datetime.now(UTC))
+        record.status = BackgroundJobStatus.QUEUED.value
+        record.progress_percentage = 0
+        record.status_message = "Manual retry queued"
+        record.attempt_count = 0
+        record.manual_retry_count += 1
+        record.last_manual_retry_at = retried_at
+        record.scheduled_at = retried_at
+        record.started_at = None
+        record.completed_at = None
+        record.cancellation_requested_at = None
+        record.retry_at = None
+        record.claimed_by = None
+        record.heartbeat_at = None
+        record.failure_code = None
+        record.failure_message = None
+        run.status = "PENDING"
+        run.started_at = None
+        run.finished_at = None
+        run.error_code = None
+        run.error_message = None
         self._session.flush()
         return record
 

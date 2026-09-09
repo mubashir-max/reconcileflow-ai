@@ -48,6 +48,8 @@ def test_records_and_relationships_persist(session: Session) -> None:
     assert loaded.results[0].bank_source_record_ids == ["BANK-1"]
     assert loaded.audit_events[0].details == {"source": "api"}
     assert loaded.background_job.status == "QUEUED"
+    assert loaded.background_job.total_attempt_count == 0
+    assert loaded.background_job.manual_retry_count == 0
 
 
 def test_database_constraints_reject_invalid_status(session: Session) -> None:

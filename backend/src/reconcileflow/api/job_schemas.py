@@ -26,7 +26,10 @@ class BackgroundJobResponse(StrictModel):
     progress_percentage: int = Field(ge=0, le=100)
     status_message: str | None
     attempt_count: int = Field(ge=0)
+    total_attempt_count: int = Field(ge=0)
+    manual_retry_count: int = Field(ge=0)
     max_attempts: int = Field(ge=1)
+    last_manual_retry_at: datetime | None
     failure_code: str | None
     failure_message: str | None
     scheduled_at: datetime

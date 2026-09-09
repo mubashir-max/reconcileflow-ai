@@ -291,6 +291,7 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `GET /api/v1/background-jobs` | List organization jobs with pagination and status filtering. |
 | `GET /api/v1/background-jobs/{job_id}` | Retrieve safe job progress and lifecycle details. |
 | `POST /api/v1/background-jobs/{job_id}/cancel` | Cancel a queued job or request cancellation of a running job. |
+| `POST /api/v1/background-jobs/{job_id}/retry` | Safely requeue a failed job without changing its identity. |
 | `GET /api/v1/reconciliation-runs/{run_id}/results` | List and filter persisted results. |
 | `GET /api/v1/results/{result_id}` | Retrieve one explainable result. |
 | `GET /api/v1/reconciliation-runs/{run_id}/audit-events` | Retrieve ordered audit events. |
@@ -311,6 +312,8 @@ The easiest way to learn the workflow is through `/docs`: open each endpoint, se
 10. Poll the returned background-job ID until it reaches a terminal state, then retrieve the run results and audit events.
 
 Bank and ERP inputs are required. One file of each source type is allowed per pending run. The execution endpoint returns HTTP `202 Accepted`; reconciliation runs in the separate worker process. Supply an optional timezone-aware `scheduled_at` value to delay execution for up to 365 days. Duplicate jobs are rejected. Job responses intentionally omit worker identities, heartbeats, storage paths, and raw exceptions. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
+
+OWNER, ADMIN, and ANALYST members can manually retry a failed job up to `RECONCILEFLOW_MAX_MANUAL_JOB_RETRIES` times. A retry retains the job ID and lifetime attempt count, resets only the current attempt cycle, and is refused if results already exist or the job is not terminally failed.
 
 Docker Compose starts the worker automatically. For a directly installed development environment, run it separately:
 
