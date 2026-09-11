@@ -1175,6 +1175,18 @@ class SourceFileRepository:
         statement = select(SourceFileRecord).where(SourceFileRecord.run_id == run_id).order_by(SourceFileRecord.source_type, SourceFileRecord.id)
         return list(self._session.scalars(statement))
 
+    def find_by_storage_key(
+        self, storage_key: str, *, organization_id: uuid.UUID
+    ) -> SourceFileRecord | None:
+        return self._session.scalar(
+            select(SourceFileRecord)
+            .join(ReconciliationRunRecord)
+            .where(
+                SourceFileRecord.storage_key == storage_key,
+                ReconciliationRunRecord.organization_id == organization_id,
+            )
+        )
+
 
 class ConfigurationSnapshotRepository:
     def __init__(self, session: Session) -> None:

@@ -120,13 +120,14 @@ def test_s3_provider_issues_bounded_private_presigned_requests(monkeypatch):
     storage = _storage(monkeypatch, client)
     key, url, fields = storage.create_upload_url(
         namespace="tenant-id", filename="transactions.csv",
-        content_type="text/csv", expires_seconds=300,
+        content_type="text/csv", checksum_sha256="a" * 64, expires_seconds=300,
     )
     assert url.startswith("https://")
     assert fields["key"] == key
     assert client.presigned_post_args["ExpiresIn"] == 300
     assert ["content-length-range", 1, 1024] in client.presigned_post_args["Conditions"]
     assert "ACL" not in client.presigned_post_args["Fields"]
+    assert client.presigned_post_args["Fields"]["x-amz-meta-checksum-sha256"] == "a" * 64
 
     client.objects[key] = b"id,amount\n1,10\n"
     download = storage.create_download_url(key, expires_seconds=120)

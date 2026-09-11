@@ -39,6 +39,7 @@ class SourceFileListResponse(StrictModel):
 class PresignedUploadRequest(StrictModel):
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(min_length=1, max_length=200)
+    checksum_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class PresignedUploadResponse(StrictModel):
@@ -51,3 +52,12 @@ class PresignedUploadResponse(StrictModel):
 class PresignedDownloadResponse(StrictModel):
     url: str
     expires_in_seconds: int
+
+
+class DirectUploadFinalizationRequest(StrictModel):
+    storage_key: str = Field(min_length=36, max_length=100)
+    source_type: SourceFileType
+    original_filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=1, max_length=200)
+    size_bytes: int = Field(ge=1)
+    checksum_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

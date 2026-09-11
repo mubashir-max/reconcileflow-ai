@@ -333,6 +333,8 @@ File operations use a provider-independent private-storage contract for bounded 
 
 When S3 storage is selected, authenticated clients may request short-lived presigned POST uploads and GET downloads. Upload policies enforce the configured size limit and exact CSV/XLSX content type. URL lifetime is controlled by `RECONCILEFLOW_PRESIGNED_URL_TTL_SECONDS` (60–900 seconds). These URLs are bearer capabilities and must never be logged, cached, or persisted; buckets and objects remain private.
 
+After a direct upload completes, call `POST /api/v1/reconciliation-runs/{run_id}/files/finalize`. ReconcileFlow independently verifies the tenant-scoped object key, provider metadata, byte length, streamed SHA-256 checksum, and CSV/XLSX structure before creating source-file metadata. Invalid owned objects are removed; repeated completion of the same run, source type, and object is idempotent.
+
 For local S3-compatible development, set `RECONCILEFLOW_STORAGE_PROVIDER=s3` in the untracked `.env.docker` file and start Docker Compose; the bundled MinIO service creates the development bucket. Keep access keys only in environment variables or a production secret manager—never place credentials in the endpoint URL, source control, logs, or API responses. Production requires HTTPS for remote endpoints and an explicitly provisioned private bucket.
 
 OWNER, ADMIN, and ANALYST members can manually retry a failed job up to `RECONCILEFLOW_MAX_MANUAL_JOB_RETRIES` times. A retry retains the job ID and lifetime attempt count, resets only the current attempt cycle, and is refused if results already exist or the job is not terminally failed.

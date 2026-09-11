@@ -112,7 +112,10 @@ class S3FileStorage:
         try:
             response = self._client.head_object(Bucket=self.bucket, Key=storage_key)
             return StorageObjectMetadata(
-                storage_key=storage_key, size_bytes=int(response["ContentLength"])
+                storage_key=storage_key,
+                size_bytes=int(response["ContentLength"]),
+                content_type=response.get("ContentType"),
+                checksum_sha256=response.get("Metadata", {}).get("checksum-sha256"),
             )
         except ClientError as error:
             self._raise_client_error(error)
@@ -127,7 +130,8 @@ class S3FileStorage:
             raise StorageOperationError("the storage operation could not be completed") from error
 
     def create_upload_url(
-        self, *, namespace: str, filename: str, content_type: str, expires_seconds: int
+        self, *, namespace: str, filename: str, content_type: str,
+        checksum_sha256: str | None = None, expires_seconds: int
     ) -> tuple[str, str, dict[str, str]]:
         try:
             safe_name, extension = LocalFileStorage._validated_filename(filename)
@@ -136,14 +140,19 @@ class S3FileStorage:
                 raise InvalidStorageKeyError("content type does not match the filename")
             prefix = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:16]
             storage_key = f"{prefix}-{uuid.uuid4().hex}{extension}"
+            fields = {"Content-Type": expected_type}
+            conditions: list[object] = [
+                {"Content-Type": expected_type},
+                ["content-length-range", 1, self.max_size_bytes],
+            ]
+            if checksum_sha256:
+                fields["x-amz-meta-checksum-sha256"] = checksum_sha256
+                conditions.append({"x-amz-meta-checksum-sha256": checksum_sha256})
             response = self._client.generate_presigned_post(
                 Bucket=self.bucket,
                 Key=storage_key,
-                Fields={"Content-Type": expected_type},
-                Conditions=[
-                    {"Content-Type": expected_type},
-                    ["content-length-range", 1, self.max_size_bytes],
-                ],
+                Fields=fields,
+                Conditions=conditions,
                 ExpiresIn=expires_seconds,
             )
             return storage_key, str(response["url"]), {
@@ -153,6 +162,19 @@ class S3FileStorage:
             raise
         except (BotoCoreError, ClientError, KeyError, TypeError) as error:
             raise StorageOperationError("the storage operation could not be completed") from error
+
+    def belongs_to_namespace(self, storage_key: str, *, namespace: str) -> bool:
+        self._validate_key(storage_key)
+        prefix = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:16]
+        return storage_key.startswith(f"{prefix}-")
+
+    def inspect_materialized(
+        self, path: Path, *, original_filename: str, storage_key: str
+    ) -> StoredUpload:
+        validator = LocalFileStorage(Path(tempfile.gettempdir()), self.max_size_bytes)
+        return validator.inspect_materialized(
+            path, original_filename=original_filename, storage_key=storage_key
+        )
 
     def create_download_url(self, storage_key: str, *, expires_seconds: int) -> str:
         self._validate_key(storage_key)
