@@ -339,6 +339,8 @@ Pending source files can be removed with `DELETE /api/v1/files/{file_id}` by OWN
 
 Preview abandoned direct-upload cleanup with `python -m reconcileflow.maintenance cleanup-uploads --dry-run`, then omit `--dry-run` to delete tenant-scoped objects older than `RECONCILEFLOW_ABANDONED_UPLOAD_RETENTION_HOURS` that have no source-file record. Cleanup logs only aggregate counts and never object keys.
 
+Verify database metadata, organization usage counters, and private stored objects with `python -m reconcileflow.maintenance verify-storage`. Verification is read-only by default. Use `python -m reconcileflow.maintenance verify-storage --repair` to repair usage counters and delete only aged, confirmed abandoned objects. Reports contain aggregate counts only—never object keys, paths, signed URLs, credentials, or file contents.
+
 For local S3-compatible development, set `RECONCILEFLOW_STORAGE_PROVIDER=s3` in the untracked `.env.docker` file and start Docker Compose; the bundled MinIO service creates the development bucket. Keep access keys only in environment variables or a production secret manager—never place credentials in the endpoint URL, source control, logs, or API responses. Production requires HTTPS for remote endpoints and an explicitly provisioned private bucket.
 
 OWNER, ADMIN, and ANALYST members can manually retry a failed job up to `RECONCILEFLOW_MAX_MANUAL_JOB_RETRIES` times. A retry retains the job ID and lifetime attempt count, resets only the current attempt cycle, and is refused if results already exist or the job is not terminally failed.
