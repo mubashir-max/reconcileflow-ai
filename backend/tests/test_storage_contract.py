@@ -45,7 +45,19 @@ async def test_local_provider_implements_complete_streaming_contract(tmp_path):
     assert not storage.exists(stored.storage_key)
 
 
-@pytest.mark.parametrize("key", ("", ".hidden", "../escape.csv", "folder/file.csv", "C:\\secret.csv"))
+@pytest.mark.parametrize(
+    "key",
+    (
+        "",
+        ".hidden",
+        "../escape.csv",
+        "folder/file.csv",
+        "folder\\file.csv",
+        "C:\\secret.csv",
+        "a" * 32 + ".exe",
+        "A" * 32 + ".csv",
+    ),
+)
 def test_local_provider_rejects_unsafe_object_keys(tmp_path, key):
     storage = LocalFileStorage(tmp_path / "private", 1024)
     with pytest.raises(InvalidStorageKeyError, match="invalid storage key"):

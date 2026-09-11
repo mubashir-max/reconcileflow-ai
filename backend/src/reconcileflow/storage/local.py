@@ -43,6 +43,7 @@ class LocalFileStorage:
 
     _CHUNK_SIZE = 64 * 1024
     _CONTENT_TYPES = {".csv": "text/csv", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+    _STORAGE_KEY = re.compile(r"(?:[0-9a-f]{16}-)?[0-9a-f]{32}\.(?:csv|xlsx)\Z")
 
     def __init__(self, directory: Path, max_size_bytes: int) -> None:
         self.directory = directory.resolve()
@@ -124,10 +125,9 @@ class LocalFileStorage:
         """Resolve a server-generated key without allowing traversal."""
         candidate = self.directory / storage_key
         if (
-            not storage_key
+            self._STORAGE_KEY.fullmatch(storage_key) is None
             or candidate.name != storage_key
             or candidate.parent.resolve() != self.directory
-            or storage_key.startswith(".")
         ):
             raise InvalidStorageKeyError("invalid storage key")
         if require_exists and not candidate.is_file():
