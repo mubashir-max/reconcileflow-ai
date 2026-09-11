@@ -56,6 +56,11 @@ class APISettings(BaseSettings):
     worker_retry_delay_seconds: int = Field(default=30, ge=1, le=86400)
     max_manual_job_retries: int = Field(default=3, ge=1, le=20)
     worker_health_stale_seconds: int = Field(default=120, ge=30, le=86400)
+    succeeded_job_retention_days: int = Field(default=30, ge=1, le=3650)
+    failed_job_retention_days: int = Field(default=90, ge=1, le=3650)
+    cancelled_job_retention_days: int = Field(default=30, ge=1, le=3650)
+    worker_record_retention_days: int = Field(default=7, ge=1, le=3650)
+    cleanup_batch_size: int = Field(default=500, ge=1, le=10000)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:

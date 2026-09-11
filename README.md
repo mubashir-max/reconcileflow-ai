@@ -319,6 +319,15 @@ OWNER, ADMIN, and ANALYST members can manually retry a failed job up to `RECONCI
 
 Workers persist internal lifecycle heartbeats. Tenant APIs expose only aggregate queue counts and eligible wait age; health responses expose only active and stale worker totals. Worker names, hostnames, process IDs, and connection details remain internal.
 
+Completed queue records use configurable retention periods while reconciliation runs, results, source-file metadata, and audit history are preserved. Preview or execute bounded maintenance with:
+
+```powershell
+python -m reconcileflow.maintenance cleanup --dry-run
+python -m reconcileflow.maintenance cleanup
+```
+
+Configure retention with `RECONCILEFLOW_SUCCEEDED_JOB_RETENTION_DAYS`, `RECONCILEFLOW_FAILED_JOB_RETENTION_DAYS`, `RECONCILEFLOW_CANCELLED_JOB_RETENTION_DAYS`, `RECONCILEFLOW_WORKER_RECORD_RETENTION_DAYS`, and `RECONCILEFLOW_CLEANUP_BATCH_SIZE`. Output contains aggregate counts only.
+
 Docker Compose starts the worker automatically. For a directly installed development environment, run it separately:
 
 ```powershell
