@@ -1,6 +1,6 @@
 # ReconcileFlow AI
 
-ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.3 adds secure authentication and organization-based multi-tenancy to the persistent FastAPI and PostgreSQL platform.
+ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.4 adds durable background processing and operational job management to the secure, multi-tenant FastAPI and PostgreSQL platform.
 
 All repository fixtures are synthetic and anonymized. They contain no real customers, accounts, cards, or payments.
 
@@ -39,6 +39,19 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Strict tenant isolation for runs, files, results, and audit records
 - Append-only security audit events without passwords or token values
 - Automated authentication and multi-tenant testing against SQLite and PostgreSQL
+
+## v0.4 capabilities
+
+- Durable, tenant-scoped background jobs for asynchronous reconciliation
+- Standalone workers with atomic claiming, leases, heartbeats, and stale-job recovery
+- Scheduled execution, configurable retry backoff, and controlled manual retries
+- Cooperative cancellation and persisted per-job execution deadlines
+- LOW, NORMAL, and HIGH priorities with aging to prevent starvation
+- Safe queue summaries and aggregate worker-readiness monitoring
+- Configurable cleanup of expired job and worker operational records
+- Ordered, sanitized lifecycle-event history without infrastructure identifiers
+- Docker Compose API, worker, and PostgreSQL development environment
+- Automated SQLite, PostgreSQL, Python 3.12/3.14, and container validation
 
 ## Architecture
 
@@ -263,7 +276,7 @@ Start the local service with Docker Compose:
 docker compose up --build -d
 ```
 
-Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.3 endpoints are:
+Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.4 endpoints are:
 
 | Method and path | Purpose |
 | --- | --- |
@@ -362,7 +375,7 @@ Security audit events record successful authentication, token rotation and revoc
 
 ## Current limitations
 
-Version 0.3 is a secure multi-tenant backend foundation, not yet a deployed end-user SaaS product. It does not include:
+Version 0.4 is a secure multi-tenant background-processing platform, not yet a deployed end-user SaaS product. It does not include:
 
 - Email verification or password-reset email delivery
 - Microsoft, Google, or other external OAuth login

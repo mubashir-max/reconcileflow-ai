@@ -6,10 +6,10 @@ from httpx import ASGITransport, AsyncClient
 from reconcileflow.api import APISettings, create_app
 
 
-EXPECTED_VERSION = "0.3.0"
+EXPECTED_VERSION = "0.4.0"
 
 
-def test_installed_package_reports_v030():
+def test_installed_package_reports_v040():
     assert version("reconcileflow-ai") == EXPECTED_VERSION
 
 
@@ -19,7 +19,7 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-async def test_fastapi_and_openapi_report_v030():
+async def test_fastapi_and_openapi_report_v040():
     app = create_app(APISettings(environment="test", _env_file=None))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         service = await client.get("/")
