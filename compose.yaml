@@ -19,6 +19,26 @@ services:
       retries: 10
       start_period: 10s
 
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    env_file:
+      - path: .env.docker.example
+      - path: .env.docker
+        required: false
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - object_storage:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   api:
     build:
       context: .
@@ -36,6 +56,8 @@ services:
       - uploaded_files:/app/var/uploads
     depends_on:
       db:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=3)"]
@@ -72,3 +94,4 @@ services:
 volumes:
   postgres_data:
   uploaded_files:
+  object_storage:

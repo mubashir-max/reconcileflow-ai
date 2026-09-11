@@ -36,6 +36,21 @@ def main() -> None:
                 settings.storage_provider,
                 directory=settings.upload_directory,
                 max_size_bytes=settings.max_upload_size_bytes,
+                s3_bucket=settings.s3_bucket,
+                s3_region=settings.s3_region,
+                s3_endpoint_url=settings.s3_endpoint_url,
+                s3_access_key_id=(
+                    settings.s3_access_key_id.get_secret_value()
+                    if settings.s3_access_key_id else None
+                ),
+                s3_secret_access_key=(
+                    settings.s3_secret_access_key.get_secret_value()
+                    if settings.s3_secret_access_key else None
+                ),
+                s3_use_path_style=settings.s3_use_path_style,
+                s3_connect_timeout_seconds=settings.s3_connect_timeout_seconds,
+                s3_read_timeout_seconds=settings.s3_read_timeout_seconds,
+                s3_auto_create_bucket=settings.s3_auto_create_bucket,
             ),
         ),
         worker_id=settings.worker_id,

@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16",
+    "boto3>=1.40,<2",
     "fastapi>=0.116",
     "openpyxl>=3.1",
     "pwdlib[argon2]>=0.3",

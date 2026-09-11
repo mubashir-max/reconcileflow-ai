@@ -21,6 +21,21 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         resolved.storage_provider,
         directory=resolved.upload_directory,
         max_size_bytes=resolved.max_upload_size_bytes,
+        s3_bucket=resolved.s3_bucket,
+        s3_region=resolved.s3_region,
+        s3_endpoint_url=resolved.s3_endpoint_url,
+        s3_access_key_id=(
+            resolved.s3_access_key_id.get_secret_value()
+            if resolved.s3_access_key_id else None
+        ),
+        s3_secret_access_key=(
+            resolved.s3_secret_access_key.get_secret_value()
+            if resolved.s3_secret_access_key else None
+        ),
+        s3_use_path_style=resolved.s3_use_path_style,
+        s3_connect_timeout_seconds=resolved.s3_connect_timeout_seconds,
+        s3_read_timeout_seconds=resolved.s3_read_timeout_seconds,
+        s3_auto_create_bucket=resolved.s3_auto_create_bucket,
     )
 
     @asynccontextmanager
