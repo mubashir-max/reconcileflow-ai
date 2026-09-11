@@ -5,7 +5,9 @@ from __future__ import annotations
 from enum import StrEnum
 from importlib.metadata import version
 from pathlib import Path
+import re
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,6 +45,15 @@ class APISettings(BaseSettings):
     database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
     upload_directory: Path = Path("var/uploads")
     storage_provider: str = "local"
+    s3_endpoint_url: str | None = None
+    s3_region: str = Field(default="us-east-1", min_length=1, max_length=100)
+    s3_bucket: str | None = None
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
+    s3_use_path_style: bool = False
+    s3_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
+    s3_read_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    s3_auto_create_bucket: bool = False
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
     token_signing_secret: SecretStr = SecretStr("development-only-change-this-token-secret")
     token_issuer: str = Field(default="reconcileflow-api", min_length=1, max_length=200)
@@ -75,6 +86,25 @@ class APISettings(BaseSettings):
             raise ValueError("production requires a non-default token_signing_secret")
         if self.default_job_timeout_seconds > self.maximum_job_timeout_seconds:
             raise ValueError("default_job_timeout_seconds must not exceed maximum_job_timeout_seconds")
+        if (self.s3_access_key_id is None) != (self.s3_secret_access_key is None):
+            raise ValueError("S3 access key ID and secret access key must be configured together")
+        if self.storage_provider == "s3":
+            if not self.s3_bucket or not re.fullmatch(
+                r"(?=.{3,63}\Z)[a-z0-9][a-z0-9.-]*[a-z0-9]", self.s3_bucket
+            ):
+                raise ValueError("S3 storage requires a valid private bucket name")
+            if self.s3_endpoint_url:
+                endpoint = urlsplit(self.s3_endpoint_url)
+                if endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
+                    raise ValueError("S3 endpoint URL must not contain credentials, query, or fragment")
+                if endpoint.scheme not in {"http", "https"} or not endpoint.hostname:
+                    raise ValueError("S3 endpoint URL must be an absolute HTTP or HTTPS URL")
+                if endpoint.scheme == "http" and endpoint.hostname not in {
+                    "localhost", "127.0.0.1", "::1", "minio"
+                }:
+                    raise ValueError("plain HTTP S3 endpoints are restricted to local development")
+            if self.environment is Environment.PRODUCTION and self.s3_auto_create_bucket:
+                raise ValueError("production S3 buckets must be provisioned explicitly")
         return self
 
     @field_validator("database_url")
@@ -114,6 +144,6 @@ class APISettings(BaseSettings):
     @classmethod
     def validate_storage_provider(cls, value: str) -> str:
         provider = value.strip().lower()
-        if provider != "local":
-            raise ValueError("storage_provider must be 'local'")
+        if provider not in {"local", "s3"}:
+            raise ValueError("storage_provider must be 'local' or 's3'")
         return provider

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import ExitStack
 
 from reconcileflow.audit import AuditEventType, AuditTrail
 from reconcileflow.ingestion import (
@@ -56,9 +57,12 @@ class ReconciliationJobProcessor:
         )
         trail = AuditTrail()
         trail.run_id = str(job.run_id)
+        materializations = ExitStack()
         try:
             paths = {
-                source_type: self._storage.resolve(record.storage_key or "")
+                source_type: materializations.enter_context(
+                    self._storage.materialize(record.storage_key or "")
+                )
                 for source_type, record in files.items()
             }
             trail.start(
@@ -129,6 +133,8 @@ class ReconciliationJobProcessor:
             if job.attempt_count >= job.max_attempts:
                 self._fail_run(job, trail, error, code="EXECUTION_FAILED")
             raise
+        finally:
+            materializations.close()
 
     def _fail_run(
         self,

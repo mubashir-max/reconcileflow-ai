@@ -15,6 +15,9 @@ def test_compose_defines_database_api_healthchecks_and_volumes():
     assert "worker:" in compose
     assert '["python", "-m", "reconcileflow.worker"]' in compose
     assert 'RECONCILEFLOW_RUN_MIGRATIONS: "false"' in compose
+    assert "minio/minio:latest" in compose
+    assert "minio/health/live" in compose
+    assert "object_storage:/data" in compose
 
 
 def test_container_starts_as_non_root_and_applies_migrations():

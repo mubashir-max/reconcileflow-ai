@@ -61,6 +61,41 @@ def test_upload_settings_are_validated(tmp_path):
         APISettings(storage_provider="unsupported", _env_file=None)
 
 
+def test_s3_settings_are_secret_and_restrict_insecure_remote_endpoints():
+    settings = APISettings(
+        environment="test",
+        storage_provider="s3",
+        s3_endpoint_url="http://localhost:9000",
+        s3_bucket="reconcileflow-uploads",
+        s3_access_key_id="local-user",
+        s3_secret_access_key="local-secret",
+        s3_use_path_style=True,
+        s3_auto_create_bucket=True,
+        _env_file=None,
+    )
+    assert settings.s3_access_key_id.get_secret_value() == "local-user"
+    assert settings.s3_secret_access_key.get_secret_value() == "local-secret"
+    assert "local-secret" not in repr(settings)
+    with pytest.raises(ValidationError, match="configured together"):
+        APISettings(s3_access_key_id="only-one", _env_file=None)
+    with pytest.raises(ValidationError, match="plain HTTP"):
+        APISettings(
+            storage_provider="s3", s3_endpoint_url="http://objects.example.com",
+            s3_bucket="private-bucket", _env_file=None,
+        )
+    with pytest.raises(ValidationError, match="must not contain credentials"):
+        APISettings(
+            storage_provider="s3", s3_endpoint_url="https://user:pass@example.com",
+            s3_bucket="private-bucket", _env_file=None,
+        )
+    with pytest.raises(ValidationError, match="provisioned explicitly"):
+        APISettings(
+            environment="production", storage_provider="s3",
+            s3_bucket="private-bucket", s3_auto_create_bucket=True,
+            token_signing_secret="p" * 32, _env_file=None,
+        )
+
+
 def test_token_settings_are_secret_and_validated():
     settings = APISettings(token_signing_secret="a" * 32, access_token_ttl_minutes=10, refresh_token_ttl_days=7, _env_file=None)
     assert settings.token_signing_secret.get_secret_value() == "a" * 32
