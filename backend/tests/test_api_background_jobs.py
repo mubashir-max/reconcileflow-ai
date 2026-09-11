@@ -97,12 +97,17 @@ async def test_list_get_filter_and_paginate_jobs_without_worker_secrets(jobs_app
     ) as client:
         listing = await client.get("/api/v1/background-jobs?limit=1&offset=0")
         running = await client.get("/api/v1/background-jobs?status=RUNNING")
+        summary = await client.get("/api/v1/background-jobs/summary")
         detail = await client.get(f"/api/v1/background-jobs/{first}")
 
     assert listing.status_code == running.status_code == detail.status_code == 200
     assert listing.json()["total"] == 2
     assert len(listing.json()["items"]) == 1
     assert running.json()["total"] == 1
+    assert summary.status_code == 200
+    assert summary.json()["running"] == 1
+    assert summary.json()["queued"] == 1
+    assert "worker_id" not in summary.text
     assert detail.json()["id"] == str(first)
     assert detail.json()["status"] == "RUNNING"
     assert set(detail.json()).isdisjoint({"claimed_by", "heartbeat_at", "storage_key"})

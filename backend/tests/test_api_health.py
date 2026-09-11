@@ -2,9 +2,10 @@ from fastapi import APIRouter
 from httpx import ASGITransport, AsyncClient
 import pytest
 from sqlalchemy.exc import OperationalError
+from datetime import UTC, datetime, timedelta
 
 from reconcileflow.api import APISettings, Environment, create_app
-from reconcileflow.persistence import get_database
+from reconcileflow.persistence import Base, PersistenceUnitOfWork, get_database
 
 
 def _app(**values):
@@ -60,6 +61,41 @@ async def test_readiness_endpoint_uses_validated_settings():
         "version": "0.2-test",
         "environment": "test",
     }
+
+
+@pytest.mark.anyio
+async def test_worker_readiness_uses_safe_aggregate_health(tmp_path):
+    app = _app(database_url=f"sqlite+pysqlite:///{(tmp_path / 'health.db').as_posix()}")
+    Base.metadata.create_all(app.state.database.engine)
+    unavailable = await _get(app, "/api/v1/health/worker-ready")
+    with app.state.database.session() as session:
+        with PersistenceUnitOfWork(session) as work:
+            work.workers.heartbeat("private-worker-name", at=datetime.now(UTC))
+    ready = await _get(app, "/api/v1/health/worker-ready")
+    assert unavailable.status_code == 503
+    assert unavailable.json() == {
+        "status": "unavailable", "active_workers": 0, "stale_workers": 0
+    }
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready", "active_workers": 1, "stale_workers": 0}
+    assert "private-worker-name" not in ready.text
+
+
+@pytest.mark.anyio
+async def test_worker_readiness_counts_stale_workers(tmp_path):
+    app = _app(database_url=f"sqlite+pysqlite:///{(tmp_path / 'stale.db').as_posix()}")
+    Base.metadata.create_all(app.state.database.engine)
+    with app.state.database.session() as session:
+        with PersistenceUnitOfWork(session) as work:
+            work.workers.heartbeat(
+                "stale-private-worker", at=datetime.now(UTC) - timedelta(minutes=10)
+            )
+    response = await _get(app, "/api/v1/health/worker-ready")
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "unavailable", "active_workers": 0, "stale_workers": 1
+    }
+    assert "stale-private-worker" not in response.text
 
 
 @pytest.mark.anyio
