@@ -291,6 +291,7 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `GET /api/v1/background-jobs` | List organization jobs with pagination and status filtering. |
 | `GET /api/v1/background-jobs/summary` | Retrieve safe organization-scoped queue totals and wait age. |
 | `GET /api/v1/background-jobs/{job_id}` | Retrieve safe job progress and lifecycle details. |
+| `GET /api/v1/background-jobs/{job_id}/events` | List tenant-scoped, sanitized lifecycle events with pagination and type filtering. |
 | `POST /api/v1/background-jobs/{job_id}/cancel` | Cancel a queued job or request cancellation of a running job. |
 | `POST /api/v1/background-jobs/{job_id}/retry` | Safely requeue a failed job without changing its identity. |
 | `GET /api/v1/health/worker-ready` | Report aggregate worker availability without infrastructure identifiers. |

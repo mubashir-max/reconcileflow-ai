@@ -176,8 +176,34 @@ def test_openapi_documents_job_monitoring_and_cancellation(jobs_app):
     paths = jobs_app.openapi()["paths"]
     assert "/api/v1/background-jobs" in paths
     assert "/api/v1/background-jobs/{job_id}" in paths
+    assert "/api/v1/background-jobs/{job_id}/events" in paths
     operation = paths["/api/v1/background-jobs/{job_id}/cancel"]["post"]
     assert all(role in operation["description"] for role in ("OWNER", "ADMIN", "ANALYST"))
+
+
+@pytest.mark.anyio
+async def test_job_event_history_is_paginated_filtered_safe_and_tenant_scoped(jobs_app):
+    job_id = _job(jobs_app)
+    other_job = _job(jobs_app, OTHER_ORG_ID)
+    with jobs_app.state.database.session() as session:
+        with PersistenceUnitOfWork(session) as work:
+            work.background_jobs.claim_next(worker_id="secret-worker", organization_id=ORG_ID)
+
+    async with AsyncClient(transport=ASGITransport(app=jobs_app), base_url="http://test") as client:
+        listing = await client.get(f"/api/v1/background-jobs/{job_id}/events?limit=1")
+        claimed = await client.get(
+            f"/api/v1/background-jobs/{job_id}/events?event_type=JOB_CLAIMED"
+        )
+        hidden = await client.get(f"/api/v1/background-jobs/{other_job}/events")
+
+    assert listing.status_code == claimed.status_code == 200
+    assert listing.json()["total"] == 2
+    assert len(listing.json()["items"]) == 1
+    assert claimed.json()["total"] == 1
+    assert claimed.json()["items"][0]["event_type"] == "JOB_CLAIMED"
+    assert set(claimed.json()["items"][0]).isdisjoint({"organization_id", "worker_id"})
+    assert "secret-worker" not in claimed.text
+    assert hidden.status_code == 404
 
 
 @pytest.mark.anyio

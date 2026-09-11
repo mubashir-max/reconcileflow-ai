@@ -19,6 +19,8 @@ from .models import (
     AuditEventRecord,
     BACKGROUND_JOB_STATUSES,
     BACKGROUND_JOB_PRIORITIES,
+    BACKGROUND_JOB_EVENT_TYPES,
+    BackgroundJobEventRecord,
     BackgroundJobRecord,
     BackgroundJobPriority,
     BackgroundJobStatus,
@@ -414,6 +416,12 @@ class BackgroundJobRepository:
         )
         self._session.add(record)
         self._session.flush()
+        self._append_event(
+            record,
+            "JOB_QUEUED",
+            datetime.now(UTC),
+            {"priority": record.priority, "status": record.status},
+        )
         return record
 
     def get(
@@ -499,14 +507,22 @@ class BackgroundJobRepository:
         conditions = self._retention_conditions(cutoffs)
         if not conditions:
             return 0
-        ids = list(self._session.scalars(
+        id_statement = (
             select(BackgroundJobRecord.id)
             .where(or_(*conditions))
             .order_by(BackgroundJobRecord.completed_at, BackgroundJobRecord.id)
             .limit(limit)
-        ))
+        )
+        if self._session.bind is not None and self._session.bind.dialect.name == "postgresql":
+            id_statement = id_statement.with_for_update(skip_locked=True)
+        ids = list(self._session.scalars(id_statement))
         if not ids:
             return 0
+        self._session.execute(
+            delete(BackgroundJobEventRecord).where(
+                BackgroundJobEventRecord.job_id.in_(ids)
+            )
+        )
         result = self._session.execute(
             delete(BackgroundJobRecord).where(
                 BackgroundJobRecord.id.in_(ids), or_(*conditions)
@@ -658,6 +674,17 @@ class BackgroundJobRepository:
         record.failure_code = None
         record.failure_message = None
         self._session.flush()
+        self._append_event(
+            record,
+            "JOB_CLAIMED",
+            claimed_at,
+            {
+                "attempt_count": record.attempt_count,
+                "priority": record.priority,
+                "status": record.status,
+                "deadline_at": record.deadline_at.isoformat(),
+            },
+        )
         return record
 
     def retry_failed(
@@ -713,6 +740,16 @@ class BackgroundJobRepository:
         run.error_code = None
         run.error_message = None
         self._session.flush()
+        self._append_event(
+            record,
+            "JOB_MANUAL_RETRY_REQUESTED",
+            retried_at,
+            {
+                "manual_retry_count": record.manual_retry_count,
+                "priority": record.priority,
+                "status": record.status,
+            },
+        )
         return record
 
     def heartbeat(
@@ -750,6 +787,7 @@ class BackgroundJobRepository:
         ).with_for_update()
         records = list(self._session.scalars(statement))
         for record in records:
+            previous_status = record.status
             if record.status == BackgroundJobStatus.CANCEL_REQUESTED.value:
                 record.status = BackgroundJobStatus.CANCELLED.value
                 record.completed_at = recovered_at
@@ -767,6 +805,17 @@ class BackgroundJobRepository:
             record.claimed_by = None
             record.heartbeat_at = None
             record.deadline_at = None
+            self._append_event(
+                record,
+                "JOB_RECOVERED",
+                recovered_at,
+                {
+                    "previous_status": previous_status,
+                    "status": record.status,
+                    "attempt_count": record.attempt_count,
+                    "failure_code": record.failure_code,
+                },
+            )
         self._session.flush()
         return len(records)
 
@@ -777,6 +826,7 @@ class BackgroundJobRepository:
         organization_id: uuid.UUID,
         progress_percentage: int,
         status_message: str | None = None,
+        at: datetime | None = None,
     ) -> BackgroundJobRecord:
         if isinstance(progress_percentage, bool) or not 0 <= progress_percentage <= 100:
             raise ValueError("progress_percentage must be between 0 and 100")
@@ -791,6 +841,15 @@ class BackgroundJobRepository:
         record.progress_percentage = progress_percentage
         record.status_message = status_message.strip()[:500] if status_message else None
         self._session.flush()
+        self._append_event(
+            record,
+            "JOB_PROGRESS_UPDATED",
+            _utc(at or datetime.now(UTC)),
+            {
+                "progress_percentage": record.progress_percentage,
+                "status": record.status,
+            },
+        )
         return record
 
     def request_cancellation(
@@ -805,12 +864,24 @@ class BackgroundJobRepository:
                 f"cannot cancel a {record.status} background job"
             )
         requested_at = _utc(at or datetime.now(UTC))
+        self._append_event(
+            record,
+            "JOB_CANCELLATION_REQUESTED",
+            requested_at,
+            {"status": record.status},
+        )
         record.cancellation_requested_at = requested_at
         if record.status == BackgroundJobStatus.QUEUED.value:
             record.status = BackgroundJobStatus.CANCELLED.value
             record.completed_at = requested_at
             record.status_message = "Cancelled before processing"
             record.deadline_at = None
+            self._append_event(
+                record,
+                "JOB_CANCELLED",
+                requested_at,
+                {"status": record.status},
+            )
         else:
             record.status = BackgroundJobStatus.CANCEL_REQUESTED.value
             record.status_message = "Cancellation requested"
@@ -851,10 +922,18 @@ class BackgroundJobRepository:
             record.status = BackgroundJobStatus.QUEUED.value
             record.retry_at = _utc(retry_at)
             record.status_message = "Retry scheduled"
+            event_type = "JOB_RETRY_SCHEDULED"
         else:
             record.status = target
             record.completed_at = completed_at
             record.progress_percentage = 100 if target == BackgroundJobStatus.SUCCEEDED.value else record.progress_percentage
+            event_type = {
+                BackgroundJobStatus.SUCCEEDED.value: "JOB_SUCCEEDED",
+                BackgroundJobStatus.CANCELLED.value: "JOB_CANCELLED",
+                BackgroundJobStatus.FAILED.value: (
+                    "JOB_TIMED_OUT" if failure_code == "JOB_TIMEOUT" else "JOB_FAILED"
+                ),
+            }[target]
         record.claimed_by = None
         record.heartbeat_at = None
         record.deadline_at = None
@@ -862,7 +941,41 @@ class BackgroundJobRepository:
             record.failure_code = failure_code.strip()[:100] if failure_code else None
             record.failure_message = failure_message.strip()[:2000] if failure_message else None
         self._session.flush()
+        details: dict[str, Any] = {
+            "status": record.status,
+            "attempt_count": record.attempt_count,
+            "failure_code": record.failure_code,
+        }
+        if record.retry_at is not None:
+            details["retry_at"] = record.retry_at.isoformat()
+        self._append_event(record, event_type, completed_at, details)
         return record
+
+    def _append_event(
+        self,
+        record: BackgroundJobRecord,
+        event_type: str,
+        occurred_at: datetime,
+        details: dict[str, Any],
+    ) -> BackgroundJobEventRecord:
+        if event_type not in BACKGROUND_JOB_EVENT_TYPES:
+            raise ValueError("invalid background job event type")
+        sequence = int(self._session.scalar(
+            select(func.max(BackgroundJobEventRecord.sequence_number)).where(
+                BackgroundJobEventRecord.job_id == record.id
+            )
+        ) or 0) + 1
+        event = BackgroundJobEventRecord(
+            organization_id=record.organization_id,
+            job_id=record.id,
+            sequence_number=sequence,
+            event_type=event_type,
+            occurred_at=_utc(occurred_at),
+            details={key: value for key, value in details.items() if value is not None},
+        )
+        self._session.add(event)
+        self._session.flush()
+        return event
 
     @staticmethod
     def _status_value(status: BackgroundJobStatus | str) -> str:
@@ -877,6 +990,65 @@ class BackgroundJobRepository:
             return BackgroundJobPriority(priority).value
         except ValueError as error:
             raise ValueError("invalid background job priority") from error
+
+
+class BackgroundJobEventRepository:
+    """Read-only, tenant-scoped access to job lifecycle history."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list(
+        self,
+        job_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+        event_type: str | None = None,
+        page: Page = Page(),
+    ) -> list[BackgroundJobEventRecord]:
+        self._ensure_job(job_id, organization_id)
+        statement = select(BackgroundJobEventRecord).where(
+            BackgroundJobEventRecord.job_id == job_id,
+            BackgroundJobEventRecord.organization_id == organization_id,
+        )
+        if event_type is not None:
+            self._validate_event_type(event_type)
+            statement = statement.where(BackgroundJobEventRecord.event_type == event_type)
+        statement = statement.order_by(
+            BackgroundJobEventRecord.sequence_number,
+            BackgroundJobEventRecord.id,
+        ).limit(page.limit).offset(page.offset)
+        return list(self._session.scalars(statement))
+
+    def count(
+        self,
+        job_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+        event_type: str | None = None,
+    ) -> int:
+        self._ensure_job(job_id, organization_id)
+        statement = select(func.count()).select_from(BackgroundJobEventRecord).where(
+            BackgroundJobEventRecord.job_id == job_id,
+            BackgroundJobEventRecord.organization_id == organization_id,
+        )
+        if event_type is not None:
+            self._validate_event_type(event_type)
+            statement = statement.where(BackgroundJobEventRecord.event_type == event_type)
+        return self._session.scalar(statement) or 0
+
+    def _ensure_job(self, job_id: uuid.UUID, organization_id: uuid.UUID) -> None:
+        exists = self._session.scalar(select(BackgroundJobRecord.id).where(
+            BackgroundJobRecord.id == job_id,
+            BackgroundJobRecord.organization_id == organization_id,
+        ))
+        if exists is None:
+            raise RecordNotFoundError(f"background job {job_id} was not found")
+
+    @staticmethod
+    def _validate_event_type(event_type: str) -> None:
+        if event_type not in BACKGROUND_JOB_EVENT_TYPES:
+            raise ValueError("invalid background job event type")
 
 
 class WorkerRepository:

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from reconcileflow.maintenance import RetentionCleanup
 from reconcileflow.persistence import (
     BackgroundJobRecord,
+    BackgroundJobEventRecord,
     BackgroundJobStatus,
     Base,
     OrganizationRecord,
@@ -116,6 +117,7 @@ def test_cleanup_deletes_only_expired_operational_records_in_batches(tmp_path) -
         assert session.get(BackgroundJobRecord, cancellation_only) is None
         assert session.get(BackgroundJobRecord, recent_cancelled) is not None
         assert session.get(BackgroundJobRecord, active_job) is not None
+        assert session.scalar(select(func.count()).select_from(BackgroundJobEventRecord)) == 2
         assert session.get(ReconciliationRunRecord, retained_run) is not None
         assert session.scalar(select(func.count()).select_from(ReconciliationRunRecord)) == 5
         assert session.get(WorkerRecord, "old-stopped") is None

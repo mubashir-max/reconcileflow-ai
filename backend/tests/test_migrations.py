@@ -26,7 +26,7 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path) -> None:
         "alembic_version", "audit_events", "configuration_snapshots",
         "reconciliation_results", "reconciliation_runs", "source_files",
         "organizations", "organization_memberships", "users", "refresh_tokens",
-        "security_audit_events", "background_jobs", "workers",
+        "security_audit_events", "background_jobs", "background_job_events", "workers",
     }
     engine.dispose()
 
@@ -265,6 +265,25 @@ def test_job_deadlines_can_add_and_remove_priorities(tmp_path: Path) -> None:
     assert queue_index["column_names"] == [
         "status", "scheduled_at", "retry_at", "created_at"
     ]
+    engine.dispose()
+
+
+def test_job_priorities_can_add_and_remove_event_history(tmp_path: Path) -> None:
+    database_path = tmp_path / "job-events-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+    command.upgrade(config, "d4a8c2f71e95")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+    assert "background_job_events" in inspector.get_table_names()
+    assert {"organization_id", "job_id", "sequence_number", "event_type", "details"} <= {
+        column["name"] for column in inspector.get_columns("background_job_events")
+    }
+    engine.dispose()
+    command.downgrade(config, "d4a8c2f71e95")
+    engine = create_engine(database_url)
+    assert "background_job_events" not in inspect(engine).get_table_names()
     engine.dispose()
 
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:

@@ -44,6 +44,19 @@ class BackgroundJobPriority(StrEnum):
 
 BACKGROUND_JOB_STATUSES = tuple(status.value for status in BackgroundJobStatus)
 BACKGROUND_JOB_PRIORITIES = tuple(priority.value for priority in BackgroundJobPriority)
+BACKGROUND_JOB_EVENT_TYPES = (
+    "JOB_QUEUED",
+    "JOB_CLAIMED",
+    "JOB_PROGRESS_UPDATED",
+    "JOB_RETRY_SCHEDULED",
+    "JOB_MANUAL_RETRY_REQUESTED",
+    "JOB_CANCELLATION_REQUESTED",
+    "JOB_CANCELLED",
+    "JOB_TIMED_OUT",
+    "JOB_SUCCEEDED",
+    "JOB_FAILED",
+    "JOB_RECOVERED",
+)
 WORKER_STATUSES = ("RUNNING", "STOPPED")
 
 
@@ -69,6 +82,9 @@ class OrganizationRecord(Base):
     )
     reconciliation_runs: Mapped[list[ReconciliationRunRecord]] = relationship(back_populates="organization")
     background_jobs: Mapped[list[BackgroundJobRecord]] = relationship(back_populates="organization")
+    background_job_events: Mapped[list[BackgroundJobEventRecord]] = relationship(
+        back_populates="organization"
+    )
 
 
 class UserRecord(Base):
@@ -242,6 +258,39 @@ class BackgroundJobRecord(Base):
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="background_jobs")
     run: Mapped[ReconciliationRunRecord] = relationship(back_populates="background_job")
+    events: Mapped[list[BackgroundJobEventRecord]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="BackgroundJobEventRecord.sequence_number",
+    )
+
+
+class BackgroundJobEventRecord(Base):
+    """Append-only, sanitized operational history for one background job."""
+
+    __tablename__ = "background_job_events"
+    __table_args__ = (
+        CheckConstraint(f"event_type IN {BACKGROUND_JOB_EVENT_TYPES}", name="valid_event_type"),
+        CheckConstraint("sequence_number >= 1", name="positive_sequence"),
+        UniqueConstraint("job_id", "sequence_number", name="uq_background_job_events_job_sequence"),
+        Index("ix_background_job_events_organization_job", "organization_id", "job_id", "sequence_number"),
+        Index("ix_background_job_events_job_occurred_at", "job_id", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("background_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="background_job_events")
+    job: Mapped[BackgroundJobRecord] = relationship(back_populates="events")
 
 
 class WorkerRecord(Base):
