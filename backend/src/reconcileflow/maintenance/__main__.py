@@ -7,13 +7,15 @@ import logging
 
 from reconcileflow.api.config import APISettings
 from reconcileflow.persistence import Database
+from reconcileflow.storage import create_file_storage
 
 from .cleanup import RetentionCleanup
+from .orphan_cleanup import AbandonedUploadCleanup
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m reconcileflow.maintenance")
-    parser.add_argument("command", choices=("cleanup",))
+    parser.add_argument("command", choices=("cleanup", "cleanup-uploads"))
     parser.add_argument(
         "--dry-run", action="store_true", help="report eligible counts without deleting"
     )
@@ -22,6 +24,32 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, settings.log_level))
     database = Database(settings)
     try:
+        if arguments.command == "cleanup-uploads":
+            storage = create_file_storage(
+                settings.storage_provider,
+                directory=settings.upload_directory,
+                max_size_bytes=settings.max_upload_size_bytes,
+                s3_bucket=settings.s3_bucket,
+                s3_region=settings.s3_region,
+                s3_endpoint_url=settings.s3_endpoint_url,
+                s3_access_key_id=settings.s3_access_key_id.get_secret_value() if settings.s3_access_key_id else None,
+                s3_secret_access_key=settings.s3_secret_access_key.get_secret_value() if settings.s3_secret_access_key else None,
+                s3_use_path_style=settings.s3_use_path_style,
+                s3_connect_timeout_seconds=settings.s3_connect_timeout_seconds,
+                s3_read_timeout_seconds=settings.s3_read_timeout_seconds,
+                s3_auto_create_bucket=False,
+            )
+            result = AbandonedUploadCleanup(
+                session_provider=database.session,
+                storage=storage,
+                retention_hours=settings.abandoned_upload_retention_hours,
+                batch_size=settings.cleanup_batch_size,
+            ).run(dry_run=arguments.dry_run)
+            logging.getLogger(__name__).info(
+                "abandoned_upload_cleanup dry_run=%s eligible_objects=%d deleted_objects=%d",
+                result.dry_run, result.eligible_objects, result.deleted_objects,
+            )
+            return
         result = RetentionCleanup(
             session_provider=database.session,
             succeeded_days=settings.succeeded_job_retention_days,

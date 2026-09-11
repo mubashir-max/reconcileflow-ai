@@ -19,6 +19,7 @@ from .base import (
     PresigningNotSupportedError,
     StorageNotFoundError,
     StorageObjectMetadata,
+    StorageObjectCandidate,
     StorageOperationError,
     StoredUpload,
     UploadStream,
@@ -175,6 +176,23 @@ class S3FileStorage:
         return validator.inspect_materialized(
             path, original_filename=original_filename, storage_key=storage_key
         )
+
+    def list_older_than(
+        self, *, namespace: str, cutoff, limit: int
+    ) -> list[StorageObjectCandidate]:
+        prefix = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:16] + "-"
+        try:
+            response = self._client.list_objects_v2(
+                Bucket=self.bucket, Prefix=prefix, MaxKeys=limit
+            )
+            return [
+                StorageObjectCandidate(str(item["Key"]), item["LastModified"])
+                for item in response.get("Contents", [])
+                if item["LastModified"] <= cutoff
+                and LocalFileStorage._STORAGE_KEY.fullmatch(str(item["Key"])) is not None
+            ]
+        except (BotoCoreError, ClientError, KeyError, TypeError) as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
 
     def create_download_url(self, storage_key: str, *, expires_seconds: int) -> str:
         self._validate_key(storage_key)

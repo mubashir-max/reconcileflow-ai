@@ -6,6 +6,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol, runtime_checkable
+from datetime import datetime
 
 
 class StorageError(Exception):
@@ -43,6 +44,12 @@ class StorageObjectMetadata:
     size_bytes: int
     content_type: str | None = None
     checksum_sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StorageObjectCandidate:
+    storage_key: str
+    last_modified: datetime
 
 
 class UploadStream(Protocol):
@@ -87,3 +94,7 @@ class FileStorage(Protocol):
     def inspect_materialized(
         self, path: Path, *, original_filename: str, storage_key: str
     ) -> StoredUpload: ...
+
+    def list_older_than(
+        self, *, namespace: str, cutoff: datetime, limit: int
+    ) -> list[StorageObjectCandidate]: ...
