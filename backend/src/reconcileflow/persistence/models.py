@@ -58,6 +58,7 @@ BACKGROUND_JOB_EVENT_TYPES = (
     "JOB_RECOVERED",
 )
 WORKER_STATUSES = ("RUNNING", "STOPPED")
+AI_SUGGESTION_STATUSES = ("PENDING", "ACCEPTED", "REJECTED", "EXPIRED")
 
 
 class OrganizationRecord(Base):
@@ -89,6 +90,7 @@ class OrganizationRecord(Base):
     background_job_events: Mapped[list[BackgroundJobEventRecord]] = relationship(
         back_populates="organization"
     )
+    ai_match_suggestions: Mapped[list[AIMatchSuggestionRecord]] = relationship(back_populates="organization")
 
 
 class UserRecord(Base):
@@ -119,6 +121,7 @@ class UserRecord(Base):
     refresh_tokens: Mapped[list[RefreshTokenRecord]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    reviewed_ai_suggestions: Mapped[list[AIMatchSuggestionRecord]] = relationship(back_populates="reviewed_by_user")
 
 
 class OrganizationMembershipRecord(Base):
@@ -201,6 +204,7 @@ class ReconciliationRunRecord(Base):
     background_job: Mapped[BackgroundJobRecord | None] = relationship(
         back_populates="run", uselist=False
     )
+    ai_match_suggestions: Mapped[list[AIMatchSuggestionRecord]] = relationship(back_populates="run")
 
 
 class BackgroundJobRecord(Base):
@@ -357,6 +361,59 @@ class ConfigurationSnapshotRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     run: Mapped[ReconciliationRunRecord] = relationship(back_populates="configuration")
+
+
+class AIMatchSuggestionRecord(Base):
+    """A tenant-scoped advisory match proposal that requires explicit review."""
+
+    __tablename__ = "ai_match_suggestions"
+    __table_args__ = (
+        CheckConstraint(f"status IN {AI_SUGGESTION_STATUSES}", name="valid_status"),
+        CheckConstraint("confidence_score >= 0 AND confidence_score <= 1", name="valid_confidence"),
+        CheckConstraint("length(candidate_fingerprint) = 64", name="valid_candidate_fingerprint"),
+        CheckConstraint("length(trim(provider)) > 0", name="nonblank_provider"),
+        CheckConstraint("length(trim(model_version)) > 0", name="nonblank_model_version"),
+        CheckConstraint("length(trim(prompt_template_version)) > 0", name="nonblank_prompt_version"),
+        CheckConstraint("length(trim(inference_config_version)) > 0", name="nonblank_config_version"),
+        CheckConstraint("expires_at IS NULL OR expires_at > created_at", name="valid_expiration"),
+        CheckConstraint(
+            "(reviewed_by_user_id IS NULL AND reviewed_at IS NULL) OR "
+            "(reviewed_by_user_id IS NOT NULL AND reviewed_at IS NOT NULL)",
+            name="consistent_review_metadata",
+        ),
+        CheckConstraint(
+            "status NOT IN ('ACCEPTED', 'REJECTED') OR reviewed_by_user_id IS NOT NULL",
+            name="resolved_suggestion_has_reviewer",
+        ),
+        UniqueConstraint("organization_id", "run_id", "candidate_fingerprint", name="uq_ai_suggestion_candidate"),
+        Index("ix_ai_match_suggestions_organization_status_created", "organization_id", "status", "created_at"),
+        Index("ix_ai_match_suggestions_run_confidence", "run_id", "confidence_score"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reconciliation_runs.id", ondelete="RESTRICT"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING", server_default="PENDING")
+    confidence_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    candidate_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    bank_record_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    erp_invoice_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    gateway_record_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    features: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(150), nullable=False)
+    prompt_template_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    inference_config_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="ai_match_suggestions")
+    run: Mapped[ReconciliationRunRecord] = relationship(back_populates="ai_match_suggestions")
+    reviewed_by_user: Mapped[UserRecord | None] = relationship(back_populates="reviewed_ai_suggestions")
 
 
 class ReconciliationResultRecord(Base):

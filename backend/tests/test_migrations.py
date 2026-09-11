@@ -27,6 +27,7 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path) -> None:
         "reconciliation_results", "reconciliation_runs", "source_files",
         "organizations", "organization_memberships", "users", "refresh_tokens",
         "security_audit_events", "background_jobs", "background_job_events", "workers",
+        "ai_match_suggestions",
     }
     engine.dispose()
 
