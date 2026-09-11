@@ -113,6 +113,7 @@ class BackgroundWorker:
         poll_interval_seconds: float = 2.0,
         stale_timeout_seconds: int = 300,
         retry_delay_seconds: int = 30,
+        priority_aging_seconds: int = 300,
         organization_id: uuid.UUID | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -125,12 +126,15 @@ class BackgroundWorker:
             raise ValueError("stale_timeout_seconds must be at least 30")
         if retry_delay_seconds < 1:
             raise ValueError("retry_delay_seconds must be positive")
+        if priority_aging_seconds < 30:
+            raise ValueError("priority_aging_seconds must be at least 30")
         self._session_provider = session_provider
         self._processor = processor
         self._worker_id = worker_id
         self._poll_interval_seconds = poll_interval_seconds
         self._stale_timeout = timedelta(seconds=stale_timeout_seconds)
         self._retry_delay = timedelta(seconds=retry_delay_seconds)
+        self._priority_aging_seconds = priority_aging_seconds
         self._organization_id = organization_id
         self._clock = clock or (lambda: datetime.now(UTC))
         self._context = WorkerContext(session_provider, worker_id, self._clock)
@@ -149,6 +153,7 @@ class BackgroundWorker:
                     worker_id=self._worker_id,
                     at=now,
                     organization_id=self._organization_id,
+                    priority_aging_seconds=self._priority_aging_seconds,
                 )
                 job = None if record is None else WorkerJob(
                     id=record.id,

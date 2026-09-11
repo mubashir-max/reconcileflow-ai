@@ -107,6 +107,9 @@ async def test_list_get_filter_and_paginate_jobs_without_worker_secrets(jobs_app
     assert summary.status_code == 200
     assert summary.json()["running"] == 1
     assert summary.json()["queued"] == 1
+    assert summary.json()["queued_normal_priority"] == 1
+    assert summary.json()["queued_low_priority"] == 0
+    assert summary.json()["queued_high_priority"] == 0
     assert "worker_id" not in summary.text
     assert detail.json()["id"] == str(first)
     assert detail.json()["status"] == "RUNNING"

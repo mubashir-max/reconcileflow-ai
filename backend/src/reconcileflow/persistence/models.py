@@ -36,7 +36,14 @@ class BackgroundJobStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class BackgroundJobPriority(StrEnum):
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+
+
 BACKGROUND_JOB_STATUSES = tuple(status.value for status in BackgroundJobStatus)
+BACKGROUND_JOB_PRIORITIES = tuple(priority.value for priority in BackgroundJobPriority)
 WORKER_STATUSES = ("RUNNING", "STOPPED")
 
 
@@ -182,6 +189,7 @@ class BackgroundJobRecord(Base):
     __tablename__ = "background_jobs"
     __table_args__ = (
         CheckConstraint(f"status IN {BACKGROUND_JOB_STATUSES}", name="valid_status"),
+        CheckConstraint(f"priority IN {BACKGROUND_JOB_PRIORITIES}", name="valid_priority"),
         CheckConstraint(
             "progress_percentage >= 0 AND progress_percentage <= 100",
             name="valid_progress_percentage",
@@ -196,7 +204,7 @@ class BackgroundJobRecord(Base):
             "completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at",
             name="valid_execution_time_range",
         ),
-        Index("ix_background_jobs_queue", "status", "scheduled_at", "retry_at", "created_at"),
+        Index("ix_background_jobs_queue", "status", "priority", "scheduled_at", "retry_at", "created_at"),
         Index("ix_background_jobs_organization_status", "organization_id", "status"),
         Index("ix_background_jobs_running_heartbeat", "status", "heartbeat_at"),
         Index("ix_background_jobs_terminal_completed", "status", "completed_at"),
@@ -210,6 +218,7 @@ class BackgroundJobRecord(Base):
         ForeignKey("reconciliation_runs.id", ondelete="RESTRICT"), nullable=False, unique=True
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="QUEUED", server_default="QUEUED")
+    priority: Mapped[str] = mapped_column(String(12), nullable=False, default="NORMAL", server_default="NORMAL")
     progress_percentage: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status_message: Mapped[str | None] = mapped_column(String(500))
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

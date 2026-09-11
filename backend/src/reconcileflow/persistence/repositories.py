@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterable
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from reconcileflow.audit import AuditEvent
@@ -18,7 +18,9 @@ from .errors import InvalidStatusTransitionError, PersistenceConflictError, Reco
 from .models import (
     AuditEventRecord,
     BACKGROUND_JOB_STATUSES,
+    BACKGROUND_JOB_PRIORITIES,
     BackgroundJobRecord,
+    BackgroundJobPriority,
     BackgroundJobStatus,
     ConfigurationSnapshotRecord,
     OrganizationMembershipRecord,
@@ -383,11 +385,13 @@ class BackgroundJobRepository:
         scheduled_at: datetime | None = None,
         max_attempts: int = 3,
         timeout_seconds: int = 900,
+        priority: BackgroundJobPriority | str = BackgroundJobPriority.NORMAL,
     ) -> BackgroundJobRecord:
         if isinstance(max_attempts, bool) or max_attempts < 1:
             raise ValueError("max_attempts must be a positive integer")
         if isinstance(timeout_seconds, bool) or timeout_seconds < 30:
             raise ValueError("timeout_seconds must be at least 30")
+        normalized_priority = self._priority_value(priority)
         run_exists = self._session.scalar(
             select(ReconciliationRunRecord.id).where(
                 ReconciliationRunRecord.id == run_id,
@@ -406,6 +410,7 @@ class BackgroundJobRepository:
             scheduled_at=_utc(scheduled_at or datetime.now(UTC)),
             max_attempts=max_attempts,
             timeout_seconds=timeout_seconds,
+            priority=normalized_priority,
         )
         self._session.add(record)
         self._session.flush()
@@ -552,6 +557,14 @@ class BackgroundJobRepository:
         ).all()
         counts = {status: 0 for status in BACKGROUND_JOB_STATUSES}
         counts.update({str(status): int(count) for status, count in rows})
+        priority_rows = self._session.execute(
+            select(BackgroundJobRecord.priority, func.count()).where(
+                BackgroundJobRecord.organization_id == organization_id,
+                BackgroundJobRecord.status == BackgroundJobStatus.QUEUED.value,
+            ).group_by(BackgroundJobRecord.priority)
+        ).all()
+        priority_counts = {priority: 0 for priority in BACKGROUND_JOB_PRIORITIES}
+        priority_counts.update({str(priority): int(count) for priority, count in priority_rows})
         retrying = int(self._session.scalar(
             select(func.count()).select_from(BackgroundJobRecord).where(
                 BackgroundJobRecord.organization_id == organization_id,
@@ -571,6 +584,7 @@ class BackgroundJobRepository:
             oldest = oldest.replace(tzinfo=UTC)
         return {
             "counts": counts,
+            "priority_counts": priority_counts,
             "retrying": retrying,
             "oldest_eligible_age_seconds": None if oldest is None else max(0, int((now - oldest).total_seconds())),
         }
@@ -581,11 +595,36 @@ class BackgroundJobRepository:
         worker_id: str,
         at: datetime | None = None,
         organization_id: uuid.UUID | None = None,
+        priority_aging_seconds: int = 300,
     ) -> BackgroundJobRecord | None:
         worker_id = worker_id.strip()
         if not worker_id or len(worker_id) > 200:
             raise ValueError("worker_id must contain between 1 and 200 characters")
+        if isinstance(priority_aging_seconds, bool) or priority_aging_seconds < 30:
+            raise ValueError("priority_aging_seconds must be at least 30")
         claimed_at = _utc(at or datetime.now(UTC))
+        eligible_since = func.coalesce(
+            BackgroundJobRecord.retry_at, BackgroundJobRecord.scheduled_at
+        )
+        aged_once = claimed_at - timedelta(seconds=priority_aging_seconds)
+        aged_twice = claimed_at - timedelta(seconds=priority_aging_seconds * 2)
+        effective_priority = case(
+            (BackgroundJobRecord.priority == BackgroundJobPriority.HIGH.value, 2),
+            (and_(
+                BackgroundJobRecord.priority == BackgroundJobPriority.NORMAL.value,
+                eligible_since <= aged_once,
+            ), 2),
+            (BackgroundJobRecord.priority == BackgroundJobPriority.NORMAL.value, 1),
+            (and_(
+                BackgroundJobRecord.priority == BackgroundJobPriority.LOW.value,
+                eligible_since <= aged_twice,
+            ), 2),
+            (and_(
+                BackgroundJobRecord.priority == BackgroundJobPriority.LOW.value,
+                eligible_since <= aged_once,
+            ), 1),
+            else_=0,
+        )
         statement = select(BackgroundJobRecord).where(
             BackgroundJobRecord.status == BackgroundJobStatus.QUEUED.value,
             BackgroundJobRecord.scheduled_at <= claimed_at,
@@ -595,8 +634,8 @@ class BackgroundJobRepository:
         if organization_id is not None:
             statement = statement.where(BackgroundJobRecord.organization_id == organization_id)
         statement = statement.order_by(
-            BackgroundJobRecord.scheduled_at,
-            BackgroundJobRecord.retry_at,
+            effective_priority.desc(),
+            eligible_since,
             BackgroundJobRecord.created_at,
             BackgroundJobRecord.id,
         ).limit(1)
@@ -831,6 +870,13 @@ class BackgroundJobRepository:
             return BackgroundJobStatus(status).value
         except ValueError as error:
             raise ValueError("invalid background job status") from error
+
+    @staticmethod
+    def _priority_value(priority: BackgroundJobPriority | str) -> str:
+        try:
+            return BackgroundJobPriority(priority).value
+        except ValueError as error:
+            raise ValueError("invalid background job priority") from error
 
 
 class WorkerRepository:

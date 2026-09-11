@@ -63,6 +63,7 @@ class APISettings(BaseSettings):
     cleanup_batch_size: int = Field(default=500, ge=1, le=10000)
     default_job_timeout_seconds: int = Field(default=900, ge=30, le=86400)
     maximum_job_timeout_seconds: int = Field(default=3600, ge=30, le=86400)
+    job_priority_aging_seconds: int = Field(default=300, ge=30, le=86400)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:

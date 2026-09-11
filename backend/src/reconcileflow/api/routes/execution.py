@@ -94,6 +94,7 @@ def execute_run(
             run_id=run_id,
             scheduled_at=scheduled_at,
             timeout_seconds=timeout_seconds,
+            priority=request.priority.value if request else "NORMAL",
         )
     return ExecutionAcceptedResponse(
         job_id=job.id,
@@ -101,6 +102,7 @@ def execute_run(
         status="QUEUED",
         scheduled_at=job.scheduled_at,
         timeout_seconds=job.timeout_seconds,
+        priority=job.priority,
     )
 
 

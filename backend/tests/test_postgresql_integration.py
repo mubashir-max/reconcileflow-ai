@@ -55,7 +55,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "workers",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
-        assert {"timeout_seconds", "deadline_at"} <= {
+        assert {"timeout_seconds", "deadline_at", "priority"} <= {
             column["name"]
             for column in inspect(app.state.database.engine).get_columns("background_jobs")
         }
@@ -143,7 +143,11 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             scheduled_at = datetime.now(UTC) + timedelta(seconds=1)
             executed = await client.post(
                 f"/api/v1/reconciliation-runs/{run_id}/execute",
-                json={"scheduled_at": scheduled_at.isoformat(), "timeout_seconds": 120},
+                json={
+                    "scheduled_at": scheduled_at.isoformat(),
+                    "timeout_seconds": 120,
+                    "priority": "HIGH",
+                },
             )
             integration_worker = BackgroundWorker(
                 session_provider=app.state.database.session,
@@ -255,6 +259,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert job_detail.status_code == 200
         assert job_detail.json()["status"] == "SUCCEEDED"
         assert job_detail.json()["timeout_seconds"] == 120
+        assert job_detail.json()["priority"] == "HIGH"
         assert job_detail.json()["deadline_at"] is None
         assert jobs.status_code == 200
         assert jobs.json()["total"] >= 1

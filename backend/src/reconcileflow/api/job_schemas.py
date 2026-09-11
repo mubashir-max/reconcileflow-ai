@@ -18,11 +18,18 @@ class BackgroundJobStatusValue(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class BackgroundJobPriorityValue(StrEnum):
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+
+
 class BackgroundJobResponse(StrictModel):
     id: uuid.UUID
     run_id: uuid.UUID
     organization_id: uuid.UUID
     status: BackgroundJobStatusValue
+    priority: BackgroundJobPriorityValue
     progress_percentage: int = Field(ge=0, le=100)
     status_message: str | None
     attempt_count: int = Field(ge=0)
@@ -59,3 +66,6 @@ class BackgroundJobQueueSummary(StrictModel):
     cancel_requested: int = Field(ge=0)
     cancelled: int = Field(ge=0)
     oldest_eligible_age_seconds: int | None = Field(default=None, ge=0)
+    queued_low_priority: int = Field(ge=0)
+    queued_normal_priority: int = Field(ge=0)
+    queued_high_priority: int = Field(ge=0)
