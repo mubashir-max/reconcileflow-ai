@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import hashlib
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -14,6 +16,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from .base import (
     InvalidStorageKeyError,
+    PresigningNotSupportedError,
     StorageNotFoundError,
     StorageObjectMetadata,
     StorageOperationError,
@@ -120,6 +123,47 @@ class S3FileStorage:
         self._validate_key(storage_key)
         try:
             self._client.delete_object(Bucket=self.bucket, Key=storage_key)
+        except (BotoCoreError, ClientError) as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
+
+    def create_upload_url(
+        self, *, namespace: str, filename: str, content_type: str, expires_seconds: int
+    ) -> tuple[str, str, dict[str, str]]:
+        try:
+            safe_name, extension = LocalFileStorage._validated_filename(filename)
+            expected_type = LocalFileStorage._CONTENT_TYPES[extension]
+            if content_type != expected_type:
+                raise InvalidStorageKeyError("content type does not match the filename")
+            prefix = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:16]
+            storage_key = f"{prefix}-{uuid.uuid4().hex}{extension}"
+            response = self._client.generate_presigned_post(
+                Bucket=self.bucket,
+                Key=storage_key,
+                Fields={"Content-Type": expected_type},
+                Conditions=[
+                    {"Content-Type": expected_type},
+                    ["content-length-range", 1, self.max_size_bytes],
+                ],
+                ExpiresIn=expires_seconds,
+            )
+            return storage_key, str(response["url"]), {
+                str(key): str(value) for key, value in response["fields"].items()
+            }
+        except (InvalidStorageKeyError, PresigningNotSupportedError):
+            raise
+        except (BotoCoreError, ClientError, KeyError, TypeError) as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
+
+    def create_download_url(self, storage_key: str, *, expires_seconds: int) -> str:
+        self._validate_key(storage_key)
+        if not self.exists(storage_key):
+            raise StorageNotFoundError("stored object is unavailable")
+        try:
+            return str(self._client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket, "Key": storage_key},
+                ExpiresIn=expires_seconds,
+            ))
         except (BotoCoreError, ClientError) as error:
             raise StorageOperationError("the storage operation could not be completed") from error
 

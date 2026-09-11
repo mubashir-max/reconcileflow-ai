@@ -139,6 +139,24 @@ async def test_duplicate_source_type_returns_conflict_and_removes_second_file(fi
 
 
 @pytest.mark.anyio
+async def test_local_provider_rejects_direct_object_urls_safely(file_app):
+    async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
+        run_id = await _create_run(client)
+        upload_url = await client.post(
+            f"/api/v1/reconciliation-runs/{run_id}/files/presigned-upload",
+            json={"filename": "bank.csv", "content_type": "text/csv"},
+        )
+        uploaded = await _upload(client, run_id)
+        download_url = await client.post(
+            f"/api/v1/files/{uploaded.json()['id']}/presigned-download"
+        )
+    assert upload_url.status_code == 409
+    assert upload_url.json()["error"]["code"] == "DIRECT_STORAGE_UNAVAILABLE"
+    assert download_url.status_code == 409
+    assert download_url.json()["error"]["code"] == "DIRECT_STORAGE_UNAVAILABLE"
+
+
+@pytest.mark.anyio
 async def test_non_pending_run_rejects_upload(file_app):
     async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
         run_id = await _create_run(client)

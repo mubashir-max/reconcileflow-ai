@@ -24,6 +24,10 @@ class StorageOperationError(StorageError):
     """A provider operation failed without exposing provider internals."""
 
 
+class PresigningNotSupportedError(StorageError):
+    """The selected provider cannot issue direct-access URLs."""
+
+
 @dataclass(frozen=True, slots=True)
 class StoredUpload:
     storage_key: str
@@ -66,3 +70,9 @@ class FileStorage(Protocol):
     def delete(self, storage_key: str) -> None: ...
 
     def materialize(self, storage_key: str) -> AbstractContextManager[Path]: ...
+
+    def create_upload_url(
+        self, *, namespace: str, filename: str, content_type: str, expires_seconds: int
+    ) -> tuple[str, str, dict[str, str]]: ...
+
+    def create_download_url(self, storage_key: str, *, expires_seconds: int) -> str: ...
