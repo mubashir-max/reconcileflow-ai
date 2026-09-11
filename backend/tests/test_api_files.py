@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from reconcileflow.api import APISettings, create_app
 from reconcileflow.api.auth_dependencies import TenantContext, get_current_user, get_tenant_context
 from reconcileflow.persistence import Base, OrganizationRecord, PersistenceUnitOfWork, SourceFileRepository
+from reconcileflow.storage import StorageOperationError
 
 
 TEST_ORGANIZATION_ID = uuid.UUID("10000000-0000-0000-0000-000000000002")
@@ -205,6 +206,52 @@ async def test_failed_direct_upload_finalization_removes_owned_invalid_object(fi
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "FILE_VALIDATION_FAILED"
     assert not file_app.state.file_storage.exists(stored.storage_key)
+
+
+@pytest.mark.anyio
+async def test_delete_pending_source_file_removes_metadata_and_object(file_app):
+    async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
+        run_id = await _create_run(client)
+        uploaded = await _upload(client, run_id)
+        file_id = uploaded.json()["id"]
+        deleted = await client.delete(f"/api/v1/files/{file_id}")
+        repeated = await client.delete(f"/api/v1/files/{file_id}")
+        retrieved = await client.get(f"/api/v1/files/{file_id}")
+    assert deleted.status_code == 204
+    assert repeated.status_code == 204
+    assert retrieved.status_code == 404
+    assert list(file_app.state.file_storage.directory.iterdir()) == []
+
+
+@pytest.mark.anyio
+async def test_storage_failure_preserves_source_file_metadata(file_app, monkeypatch):
+    async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
+        run_id = await _create_run(client)
+        uploaded = await _upload(client, run_id)
+        file_id = uploaded.json()["id"]
+        monkeypatch.setattr(
+            file_app.state.file_storage,
+            "delete",
+            lambda key: (_ for _ in ()).throw(StorageOperationError("safe failure")),
+        )
+        deleted = await client.delete(f"/api/v1/files/{file_id}")
+        retrieved = await client.get(f"/api/v1/files/{file_id}")
+    assert deleted.status_code == 503
+    assert deleted.json()["error"]["code"] == "STORAGE_UNAVAILABLE"
+    assert retrieved.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_source_file_cannot_be_deleted_after_run_starts(file_app):
+    async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
+        run_id = await _create_run(client)
+        uploaded = await _upload(client, run_id)
+        with file_app.state.database.session() as session:
+            with PersistenceUnitOfWork(session) as work:
+                work.runs.transition(uuid.UUID(run_id), "RUNNING")
+        deleted = await client.delete(f"/api/v1/files/{uploaded.json()['id']}")
+    assert deleted.status_code == 409
+    assert deleted.json()["error"]["code"] == "FILE_IN_USE"
 
 
 @pytest.mark.anyio

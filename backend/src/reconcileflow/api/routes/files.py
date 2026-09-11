@@ -134,6 +134,46 @@ def get_source_file(file_id: uuid.UUID, session: SessionDependency, tenant: Tena
     return _response(PersistenceUnitOfWork(session).source_files.get(file_id, organization_id=tenant.organization_id))
 
 
+@router.delete(
+    "/files/{file_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a pending reconciliation source file",
+    description="Requires OWNER, ADMIN, or ANALYST. Missing and cross-organization files are handled identically.",
+    responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def delete_source_file(
+    file_id: uuid.UUID,
+    session: SessionDependency,
+    storage: FileStorageDependency,
+    tenant: ReconciliationOperatorDependency,
+) -> None:
+    with PersistenceUnitOfWork(session) as work:
+        record = work.source_files.find(file_id, organization_id=tenant.organization_id)
+        if record is None:
+            return None
+        run = work.runs.get(record.run_id, organization_id=tenant.organization_id, lock=True)
+        job = work.background_jobs.get_for_run(record.run_id, organization_id=tenant.organization_id)
+        if run.status != "PENDING" or (job is not None and job.status in {"QUEUED", "RUNNING", "CANCEL_REQUESTED"}):
+            raise APIError(status_code=409, code="FILE_IN_USE", message="The file cannot be deleted after processing has started.")
+        if record.storage_key:
+            try:
+                if not storage.belongs_to_namespace(record.storage_key, namespace=str(tenant.organization_id)):
+                    raise APIError(status_code=404, code="FILE_NOT_FOUND", message="The requested file does not exist.")
+                storage.delete(record.storage_key)
+            except APIError:
+                raise
+            except StorageOperationError as error:
+                raise APIError(status_code=503, code="STORAGE_UNAVAILABLE", message="Object storage is temporarily unavailable.") from error
+        work.source_files.remove(record)
+        work.security_audit_events.append(
+            organization_id=tenant.organization_id,
+            actor_user_id=tenant.user_id,
+            event_type="SOURCE_FILE_DELETED",
+            details={"file_id": str(file_id), "run_id": str(record.run_id), "source_type": record.source_type},
+        )
+    return None
+
+
 def _presigning_error(error: Exception) -> APIError:
     if isinstance(error, PresigningNotSupportedError):
         return APIError(status_code=409, code="DIRECT_STORAGE_UNAVAILABLE", message="Direct object access is unavailable for the configured storage provider.")

@@ -82,6 +82,9 @@ class OrganizationRepository:
         self._session.flush()
         return record
 
+    def list_ids(self) -> list[uuid.UUID]:
+        return list(self._session.scalars(select(OrganizationRecord.id)))
+
 
 class UserRepository:
     def __init__(self, session: Session) -> None:
@@ -1171,6 +1174,20 @@ class SourceFileRepository:
             raise RecordNotFoundError(f"source file {file_id} was not found")
         return record
 
+    def find(self, file_id: uuid.UUID, *, organization_id: uuid.UUID) -> SourceFileRecord | None:
+        return self._session.scalar(
+            select(SourceFileRecord)
+            .join(ReconciliationRunRecord)
+            .where(
+                SourceFileRecord.id == file_id,
+                ReconciliationRunRecord.organization_id == organization_id,
+            )
+        )
+
+    def remove(self, record: SourceFileRecord) -> None:
+        self._session.delete(record)
+        self._session.flush()
+
     def list_for_run(self, run_id: uuid.UUID) -> list[SourceFileRecord]:
         statement = select(SourceFileRecord).where(SourceFileRecord.run_id == run_id).order_by(SourceFileRecord.source_type, SourceFileRecord.id)
         return list(self._session.scalars(statement))
@@ -1184,6 +1201,18 @@ class SourceFileRepository:
             .where(
                 SourceFileRecord.storage_key == storage_key,
                 ReconciliationRunRecord.organization_id == organization_id,
+            )
+        )
+
+    def referenced_storage_keys(self, *, organization_id: uuid.UUID) -> set[str]:
+        return set(
+            self._session.scalars(
+                select(SourceFileRecord.storage_key)
+                .join(ReconciliationRunRecord)
+                .where(
+                    ReconciliationRunRecord.organization_id == organization_id,
+                    SourceFileRecord.storage_key.is_not(None),
+                )
             )
         )
 

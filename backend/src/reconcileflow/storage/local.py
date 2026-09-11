@@ -10,6 +10,7 @@ import uuid
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
+from datetime import UTC, datetime
 from typing import BinaryIO, Iterator
 
 from .base import (
@@ -17,6 +18,7 @@ from .base import (
     StorageNotFoundError,
     StorageObjectMetadata,
     StorageOperationError,
+    StorageObjectCandidate,
     StoredUpload,
     UploadStream,
     PresigningNotSupportedError,
@@ -161,6 +163,28 @@ class LocalFileStorage:
             )
         except (EmptyUploadError, UploadTooLargeError, UnsupportedUploadError):
             raise
+        except OSError as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
+
+    def list_older_than(
+        self, *, namespace: str, cutoff: datetime, limit: int
+    ) -> list[StorageObjectCandidate]:
+        prefix = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:16]
+        if not self.directory.exists():
+            return []
+        candidates: list[StorageObjectCandidate] = []
+        try:
+            for path in self.directory.iterdir():
+                if len(candidates) >= limit:
+                    break
+                if not path.is_file():
+                    continue
+                if not path.name.startswith(f"{prefix}-") or self._STORAGE_KEY.fullmatch(path.name) is None:
+                    continue
+                modified = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+                if modified <= cutoff:
+                    candidates.append(StorageObjectCandidate(path.name, modified))
+            return candidates
         except OSError as error:
             raise StorageOperationError("the storage operation could not be completed") from error
 

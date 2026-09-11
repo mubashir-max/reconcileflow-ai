@@ -55,6 +55,7 @@ class APISettings(BaseSettings):
     s3_read_timeout_seconds: int = Field(default=30, ge=1, le=300)
     s3_auto_create_bucket: bool = False
     presigned_url_ttl_seconds: int = Field(default=300, ge=60, le=900)
+    abandoned_upload_retention_hours: int = Field(default=24, ge=1, le=720)
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
     token_signing_secret: SecretStr = SecretStr("development-only-change-this-token-secret")
     token_issuer: str = Field(default="reconcileflow-api", min_length=1, max_length=200)
