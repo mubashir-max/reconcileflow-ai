@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Iterable
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from reconcileflow.audit import AuditEvent
@@ -471,6 +471,74 @@ class BackgroundJobRepository:
             )
         return int(self._session.scalar(statement) or 0)
 
+    def count_expired_terminal(self, *, cutoffs: dict[BackgroundJobStatus, datetime]) -> int:
+        conditions = self._retention_conditions(cutoffs)
+        if not conditions:
+            return 0
+        return int(self._session.scalar(
+            select(func.count()).select_from(BackgroundJobRecord).where(or_(*conditions))
+        ) or 0)
+
+    def delete_expired_terminal(
+        self,
+        *,
+        cutoffs: dict[BackgroundJobStatus, datetime],
+        limit: int,
+    ) -> int:
+        if isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        conditions = self._retention_conditions(cutoffs)
+        if not conditions:
+            return 0
+        ids = list(self._session.scalars(
+            select(BackgroundJobRecord.id)
+            .where(or_(*conditions))
+            .order_by(BackgroundJobRecord.completed_at, BackgroundJobRecord.id)
+            .limit(limit)
+        ))
+        if not ids:
+            return 0
+        result = self._session.execute(
+            delete(BackgroundJobRecord).where(
+                BackgroundJobRecord.id.in_(ids), or_(*conditions)
+            )
+        )
+        self._session.flush()
+        return int(result.rowcount or 0)
+
+    @staticmethod
+    def _retention_conditions(
+        cutoffs: dict[BackgroundJobStatus, datetime],
+    ) -> list[Any]:
+        terminal = {
+            BackgroundJobStatus.SUCCEEDED,
+            BackgroundJobStatus.FAILED,
+            BackgroundJobStatus.CANCELLED,
+        }
+        conditions = []
+        for status, cutoff in cutoffs.items():
+            normalized = BackgroundJobStatus(status)
+            if normalized not in terminal:
+                raise ValueError("retention cleanup only supports terminal job statuses")
+            expired = and_(
+                BackgroundJobRecord.completed_at.is_not(None),
+                BackgroundJobRecord.completed_at <= _utc(cutoff),
+            )
+            if normalized is BackgroundJobStatus.CANCELLED:
+                expired = or_(
+                    expired,
+                    and_(
+                        BackgroundJobRecord.completed_at.is_(None),
+                        BackgroundJobRecord.cancellation_requested_at.is_not(None),
+                        BackgroundJobRecord.cancellation_requested_at <= _utc(cutoff),
+                    ),
+                )
+            conditions.append(and_(
+                BackgroundJobRecord.status == normalized.value,
+                expired,
+            ))
+        return conditions
+
     def summarize(self, *, organization_id: uuid.UUID, at: datetime | None = None) -> dict[str, Any]:
         now = _utc(at or datetime.now(UTC))
         rows = self._session.execute(
@@ -806,6 +874,40 @@ class WorkerRepository:
             )
         ) or 0)
         return active, stale
+
+    def count_expired(self, *, cutoff: datetime) -> int:
+        condition = self._retention_condition(cutoff)
+        return int(self._session.scalar(
+            select(func.count()).select_from(WorkerRecord).where(condition)
+        ) or 0)
+
+    def delete_expired(self, *, cutoff: datetime, limit: int) -> int:
+        if isinstance(limit, bool) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        condition = self._retention_condition(cutoff)
+        ids = list(self._session.scalars(
+            select(WorkerRecord.worker_id)
+            .where(condition)
+            .order_by(WorkerRecord.heartbeat_at, WorkerRecord.worker_id)
+            .limit(limit)
+        ))
+        if not ids:
+            return 0
+        result = self._session.execute(
+            delete(WorkerRecord).where(
+                WorkerRecord.worker_id.in_(ids), condition
+            )
+        )
+        self._session.flush()
+        return int(result.rowcount or 0)
+
+    @staticmethod
+    def _retention_condition(cutoff: datetime) -> Any:
+        expired_at = _utc(cutoff)
+        return or_(
+            and_(WorkerRecord.status == "STOPPED", WorkerRecord.stopped_at <= expired_at),
+            and_(WorkerRecord.status == "RUNNING", WorkerRecord.heartbeat_at <= expired_at),
+        )
 
 class SourceFileRepository:
     def __init__(self, session: Session) -> None:

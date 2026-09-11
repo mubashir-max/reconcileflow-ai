@@ -198,6 +198,7 @@ class BackgroundJobRecord(Base):
         Index("ix_background_jobs_queue", "status", "scheduled_at", "retry_at", "created_at"),
         Index("ix_background_jobs_organization_status", "organization_id", "status"),
         Index("ix_background_jobs_running_heartbeat", "status", "heartbeat_at"),
+        Index("ix_background_jobs_terminal_completed", "status", "completed_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -238,6 +239,7 @@ class WorkerRecord(Base):
     __table_args__ = (
         CheckConstraint(f"status IN {WORKER_STATUSES}", name="valid_status"),
         Index("ix_workers_status_heartbeat", "status", "heartbeat_at"),
+        Index("ix_workers_status_stopped", "status", "stopped_at"),
     )
 
     worker_id: Mapped[str] = mapped_column(String(200), primary_key=True)

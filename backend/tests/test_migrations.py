@@ -190,6 +190,31 @@ def test_manual_retries_can_add_and_remove_worker_lifecycle(tmp_path: Path) -> N
     assert "workers" not in inspect(engine).get_table_names()
     engine.dispose()
 
+
+def test_worker_lifecycle_can_add_and_remove_retention_indexes(tmp_path: Path) -> None:
+    database_path = tmp_path / "retention-indexes-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+    command.upgrade(config, "a8c4d1e72f90")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    assert "ix_background_jobs_terminal_completed" in {
+        index["name"] for index in inspect(engine).get_indexes("background_jobs")
+    }
+    assert "ix_workers_status_stopped" in {
+        index["name"] for index in inspect(engine).get_indexes("workers")
+    }
+    engine.dispose()
+    command.downgrade(config, "a8c4d1e72f90")
+    engine = create_engine(database_url)
+    assert "ix_background_jobs_terminal_completed" not in {
+        index["name"] for index in inspect(engine).get_indexes("background_jobs")
+    }
+    assert "ix_workers_status_stopped" not in {
+        index["name"] for index in inspect(engine).get_indexes("workers")
+    }
+    engine.dispose()
+
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:
     database_path = tmp_path / "tenant-upgrade.db"
     database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
