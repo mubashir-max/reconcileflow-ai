@@ -8,13 +8,21 @@ import os
 import re
 import uuid
 import zipfile
-from dataclasses import dataclass
+from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO, Iterator
 
-from fastapi import UploadFile
+from .base import (
+    InvalidStorageKeyError,
+    StorageNotFoundError,
+    StorageObjectMetadata,
+    StorageOperationError,
+    StoredUpload,
+    UploadStream,
+)
 
 
-class UploadStorageError(Exception):
+class UploadStorageError(StorageOperationError):
     """Base class for expected and safely reportable upload failures."""
 
 
@@ -30,15 +38,6 @@ class UnsupportedUploadError(UploadStorageError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
-class StoredUpload:
-    storage_key: str
-    original_filename: str
-    content_type: str
-    size_bytes: int
-    checksum_sha256: str
-
-
 class LocalFileStorage:
     """Store validated uploads under server-generated names within one directory."""
 
@@ -49,12 +48,15 @@ class LocalFileStorage:
         self.directory = directory.resolve()
         self.max_size_bytes = max_size_bytes
 
-    async def save(self, upload: UploadFile) -> StoredUpload:
+    async def save(
+        self, upload: UploadStream, *, namespace: str | None = None
+    ) -> StoredUpload:
         original_filename, extension = self._validated_filename(upload.filename)
         self.directory.mkdir(parents=True, exist_ok=True)
         identifier = uuid.uuid4().hex
+        prefix = f"{hashlib.sha256(namespace.encode('utf-8')).hexdigest()[:16]}-" if namespace else ""
         temporary = self.directory / f".{identifier}.part"
-        final = self.directory / f"{identifier}{extension}"
+        final = self.directory / f"{prefix}{identifier}{extension}"
         digest = hashlib.sha256()
         size = 0
         first_chunk = b""
@@ -81,23 +83,55 @@ class LocalFileStorage:
                 size_bytes=size,
                 checksum_sha256=digest.hexdigest(),
             )
-        except Exception:
+        except (EmptyUploadError, UploadTooLargeError, UnsupportedUploadError):
             temporary.unlink(missing_ok=True)
             final.unlink(missing_ok=True)
             raise
+        except OSError as error:
+            temporary.unlink(missing_ok=True)
+            final.unlink(missing_ok=True)
+            raise StorageOperationError("the storage operation could not be completed") from error
         finally:
             await upload.close()
 
     def delete(self, storage_key: str) -> None:
-        self.resolve(storage_key, require_exists=False).unlink(missing_ok=True)
+        try:
+            self.resolve(storage_key, require_exists=False).unlink(missing_ok=True)
+        except OSError as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
+
+    def open(self, storage_key: str) -> BinaryIO:
+        try:
+            return self.resolve(storage_key).open("rb")
+        except OSError as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
+
+    def exists(self, storage_key: str) -> bool:
+        return self.resolve(storage_key, require_exists=False).is_file()
+
+    def stat(self, storage_key: str) -> StorageObjectMetadata:
+        try:
+            path = self.resolve(storage_key)
+            return StorageObjectMetadata(storage_key=storage_key, size_bytes=path.stat().st_size)
+        except OSError as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
+
+    @contextmanager
+    def materialize(self, storage_key: str) -> Iterator[Path]:
+        yield self.resolve(storage_key)
 
     def resolve(self, storage_key: str, *, require_exists: bool = True) -> Path:
         """Resolve a server-generated key without allowing traversal."""
         candidate = self.directory / storage_key
-        if candidate.name != storage_key or candidate.parent.resolve() != self.directory:
-            raise ValueError("invalid storage key")
+        if (
+            not storage_key
+            or candidate.name != storage_key
+            or candidate.parent.resolve() != self.directory
+            or storage_key.startswith(".")
+        ):
+            raise InvalidStorageKeyError("invalid storage key")
         if require_exists and not candidate.is_file():
-            raise FileNotFoundError("stored upload is unavailable")
+            raise StorageNotFoundError("stored object is unavailable")
         return candidate
 
     @classmethod

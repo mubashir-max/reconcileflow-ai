@@ -4,11 +4,11 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from reconcileflow.storage import LocalFileStorage
+from reconcileflow.storage import FileStorage
 
 
-def get_file_storage(request: Request) -> LocalFileStorage:
+def get_file_storage(request: Request) -> FileStorage:
     return request.app.state.file_storage
 
 
-FileStorageDependency = Annotated[LocalFileStorage, Depends(get_file_storage)]
+FileStorageDependency = Annotated[FileStorage, Depends(get_file_storage)]

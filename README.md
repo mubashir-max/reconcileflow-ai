@@ -90,7 +90,7 @@ backend/src/reconcileflow/
   models/             Bank, invoice, gateway, and status models
   reconciliation/     Configuration, results, and deterministic rules
   persistence/        SQLAlchemy records, repositories, and transactions
-  storage/            Safe local uploaded-file storage
+  storage/            Provider-independent private file storage
   workflow.py         End-to-end application orchestration
 backend/tests/         Automated test suite
 data/sample/           Synthetic CSV/XLSX fixtures and expected outcomes
@@ -328,6 +328,8 @@ The easiest way to learn the workflow is through `/docs`: open each endpoint, se
 10. Poll the returned background-job ID until it reaches a terminal state, then retrieve the run results and audit events.
 
 Bank and ERP inputs are required. One file of each source type is allowed per pending run. The execution endpoint returns HTTP `202 Accepted`; reconciliation runs in the separate worker process. Supply an optional timezone-aware `scheduled_at` value to delay execution for up to 365 days. Duplicate jobs are rejected. Job responses intentionally omit worker identities, heartbeats, storage paths, and raw exceptions. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
+
+File operations use a provider-independent private-storage contract for bounded streaming writes, readable streams, existence checks, safe metadata, idempotent deletion, and controlled local materialization. `RECONCILEFLOW_STORAGE_PROVIDER=local` is the supported provider in v0.5 development; unsupported values fail during startup. Physical object keys are generated internally with an opaque tenant namespace and never use client filenames. Storage errors omit filesystem paths, credentials, connection strings, and provider responses.
 
 OWNER, ADMIN, and ANALYST members can manually retry a failed job up to `RECONCILEFLOW_MAX_MANUAL_JOB_RETRIES` times. A retry retains the job ID and lifetime attempt count, resets only the current attempt cycle, and is refused if results already exist or the job is not terminally failed.
 

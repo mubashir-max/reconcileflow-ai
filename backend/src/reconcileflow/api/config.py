@@ -42,6 +42,7 @@ class APISettings(BaseSettings):
     database_max_overflow: int = Field(default=10, ge=0, le=200)
     database_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
     upload_directory: Path = Path("var/uploads")
+    storage_provider: str = "local"
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
     token_signing_secret: SecretStr = SecretStr("development-only-change-this-token-secret")
     token_issuer: str = Field(default="reconcileflow-api", min_length=1, max_length=200)
@@ -108,3 +109,11 @@ class APISettings(BaseSettings):
         if not str(value).strip():
             raise ValueError("upload_directory must not be blank")
         return value
+
+    @field_validator("storage_provider")
+    @classmethod
+    def validate_storage_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider != "local":
+            raise ValueError("storage_provider must be 'local'")
+        return provider
