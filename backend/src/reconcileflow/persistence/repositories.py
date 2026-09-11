@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterable
 
@@ -382,9 +382,12 @@ class BackgroundJobRepository:
         run_id: uuid.UUID,
         scheduled_at: datetime | None = None,
         max_attempts: int = 3,
+        timeout_seconds: int = 900,
     ) -> BackgroundJobRecord:
         if isinstance(max_attempts, bool) or max_attempts < 1:
             raise ValueError("max_attempts must be a positive integer")
+        if isinstance(timeout_seconds, bool) or timeout_seconds < 30:
+            raise ValueError("timeout_seconds must be at least 30")
         run_exists = self._session.scalar(
             select(ReconciliationRunRecord.id).where(
                 ReconciliationRunRecord.id == run_id,
@@ -402,6 +405,7 @@ class BackgroundJobRepository:
             run_id=run_id,
             scheduled_at=_utc(scheduled_at or datetime.now(UTC)),
             max_attempts=max_attempts,
+            timeout_seconds=timeout_seconds,
         )
         self._session.add(record)
         self._session.flush()
@@ -610,6 +614,7 @@ class BackgroundJobRepository:
         record.claimed_by = worker_id
         record.heartbeat_at = claimed_at
         record.completed_at = None
+        record.deadline_at = claimed_at + timedelta(seconds=record.timeout_seconds)
         record.retry_at = None
         record.failure_code = None
         record.failure_message = None
@@ -656,6 +661,7 @@ class BackgroundJobRepository:
         record.scheduled_at = retried_at
         record.started_at = None
         record.completed_at = None
+        record.deadline_at = None
         record.cancellation_requested_at = None
         record.retry_at = None
         record.claimed_by = None
@@ -721,6 +727,7 @@ class BackgroundJobRepository:
                 record.failure_message = "Background processing was interrupted."
             record.claimed_by = None
             record.heartbeat_at = None
+            record.deadline_at = None
         self._session.flush()
         return len(records)
 
@@ -764,6 +771,7 @@ class BackgroundJobRepository:
             record.status = BackgroundJobStatus.CANCELLED.value
             record.completed_at = requested_at
             record.status_message = "Cancelled before processing"
+            record.deadline_at = None
         else:
             record.status = BackgroundJobStatus.CANCEL_REQUESTED.value
             record.status_message = "Cancellation requested"
@@ -810,6 +818,7 @@ class BackgroundJobRepository:
             record.progress_percentage = 100 if target == BackgroundJobStatus.SUCCEEDED.value else record.progress_percentage
         record.claimed_by = None
         record.heartbeat_at = None
+        record.deadline_at = None
         if target == BackgroundJobStatus.FAILED.value:
             record.failure_code = failure_code.strip()[:100] if failure_code else None
             record.failure_message = failure_message.strip()[:2000] if failure_message else None

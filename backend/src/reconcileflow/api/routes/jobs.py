@@ -45,6 +45,8 @@ def _response(record) -> BackgroundJobResponse:
         total_attempt_count=record.total_attempt_count,
         manual_retry_count=record.manual_retry_count,
         max_attempts=record.max_attempts,
+        timeout_seconds=record.timeout_seconds,
+        deadline_at=_utc(record.deadline_at),
         last_manual_retry_at=_utc(record.last_manual_retry_at),
         failure_code=record.failure_code,
         failure_message=record.failure_message,

@@ -328,6 +328,8 @@ python -m reconcileflow.maintenance cleanup
 
 Configure retention with `RECONCILEFLOW_SUCCEEDED_JOB_RETENTION_DAYS`, `RECONCILEFLOW_FAILED_JOB_RETENTION_DAYS`, `RECONCILEFLOW_CANCELLED_JOB_RETENTION_DAYS`, `RECONCILEFLOW_WORKER_RECORD_RETENTION_DAYS`, and `RECONCILEFLOW_CLEANUP_BATCH_SIZE`. Output contains aggregate counts only.
 
+New jobs receive `RECONCILEFLOW_DEFAULT_JOB_TIMEOUT_SECONDS` unless a shorter valid timeout is requested when execution is queued. Requests cannot exceed `RECONCILEFLOW_MAXIMUM_JOB_TIMEOUT_SECONDS`. Workers enforce the persisted deadline at cooperative processing checkpoints; timed-out attempts use the normal retry policy and expose only the safe `JOB_TIMEOUT` failure code and message.
+
 Docker Compose starts the worker automatically. For a directly installed development environment, run it separately:
 
 ```powershell

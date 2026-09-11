@@ -34,10 +34,12 @@ class ExecutionAcceptedResponse(StrictModel):
     run_id: uuid.UUID
     status: Literal["QUEUED"]
     scheduled_at: datetime
+    timeout_seconds: int = Field(ge=30)
 
 
 class ExecutionRequest(StrictModel):
     scheduled_at: datetime | None = None
+    timeout_seconds: int | None = Field(default=None, ge=30)
 
     @field_validator("scheduled_at")
     @classmethod

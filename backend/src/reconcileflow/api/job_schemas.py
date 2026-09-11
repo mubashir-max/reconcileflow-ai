@@ -29,6 +29,8 @@ class BackgroundJobResponse(StrictModel):
     total_attempt_count: int = Field(ge=0)
     manual_retry_count: int = Field(ge=0)
     max_attempts: int = Field(ge=1)
+    timeout_seconds: int = Field(ge=30)
+    deadline_at: datetime | None
     last_manual_retry_at: datetime | None
     failure_code: str | None
     failure_message: str | None

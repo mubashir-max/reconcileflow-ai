@@ -103,8 +103,57 @@ def test_worker_failure_is_sanitized_and_scheduled_for_retry(worker_database: Da
     assert loaded.retry_at is not None
 
 
+def test_worker_timeout_is_sanitized_and_retries_safely(worker_database: Database):
+    job = _queued_job(worker_database, max_attempts=2)
+    clock = [datetime.now(UTC)]
+
+    def exceed_deadline(claimed, context):
+        assert claimed.deadline_at == clock[0] + timedelta(seconds=900)
+        clock[0] = claimed.deadline_at
+        context.checkpoint(claimed, progress_percentage=25)
+
+    worker = BackgroundWorker(
+        session_provider=worker_database.session,
+        processor=exceed_deadline,
+        worker_id="worker-timeout",
+        retry_delay_seconds=10,
+        clock=lambda: clock[0],
+    )
+
+    assert worker.run_once() is True
+    loaded = _load(worker_database, job)
+    assert loaded.status == BackgroundJobStatus.QUEUED
+    assert loaded.failure_code == "JOB_TIMEOUT"
+    assert loaded.failure_message == "Background job exceeded its execution timeout."
+    assert loaded.deadline_at is None
+    assert loaded.retry_at.replace(tzinfo=UTC) == clock[0] + timedelta(seconds=10)
+
+
+def test_exhausted_timeout_fails_terminally(worker_database: Database):
+    job = _queued_job(worker_database, max_attempts=1)
+    clock = [datetime.now(UTC)]
+
+    def exceed_deadline(claimed, context):
+        clock[0] = claimed.deadline_at
+        context.checkpoint(claimed, progress_percentage=25)
+
+    worker = BackgroundWorker(
+        session_provider=worker_database.session,
+        processor=exceed_deadline,
+        worker_id="worker-timeout-final",
+        clock=lambda: clock[0],
+    )
+
+    assert worker.run_once() is True
+    loaded = _load(worker_database, job)
+    assert loaded.status == BackgroundJobStatus.FAILED
+    assert loaded.completed_at.replace(tzinfo=UTC) == clock[0]
+    assert loaded.deadline_at is None
+
+
 def test_worker_checkpoint_detects_and_completes_cancellation(worker_database: Database):
     job = _queued_job(worker_database)
+    clock = [datetime.now(UTC)]
 
     def process(claimed, context):
         with worker_database.session() as session:
@@ -112,16 +161,20 @@ def test_worker_checkpoint_detects_and_completes_cancellation(worker_database: D
                 work.background_jobs.request_cancellation(
                     claimed.id, organization_id=claimed.organization_id
                 )
+        clock[0] = claimed.deadline_at + timedelta(seconds=1)
         context.checkpoint(claimed, progress_percentage=25)
 
     worker = BackgroundWorker(
         session_provider=worker_database.session,
         processor=process,
         worker_id="worker-cancel",
+        clock=lambda: clock[0],
     )
 
     assert worker.run_once() is True
-    assert _load(worker_database, job).status == BackgroundJobStatus.CANCELLED
+    loaded = _load(worker_database, job)
+    assert loaded.status == BackgroundJobStatus.CANCELLED
+    assert loaded.failure_code is None
 
 
 def test_worker_recovers_stale_lease_before_processing(worker_database: Database):
