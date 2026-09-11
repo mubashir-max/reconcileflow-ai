@@ -24,6 +24,7 @@ from ..file_schemas import (
     PresignedDownloadResponse,
     PresignedUploadRequest,
     PresignedUploadResponse,
+    DirectUploadFinalizationRequest,
     SourceFileListResponse,
     SourceFileMetadataResponse,
     SourceFileType,
@@ -166,7 +167,8 @@ def create_presigned_upload(
                 raise APIError(status_code=409, code="RUN_NOT_PENDING", message="Files can only be uploaded to a pending reconciliation run.")
             key, url, fields = storage.create_upload_url(
                 namespace=str(tenant.organization_id), filename=payload.filename,
-                content_type=payload.content_type, expires_seconds=ttl,
+                content_type=payload.content_type,
+                checksum_sha256=payload.checksum_sha256, expires_seconds=ttl,
             )
             work.security_audit_events.append(
                 organization_id=tenant.organization_id, actor_user_id=tenant.user_id,
@@ -207,3 +209,83 @@ def create_presigned_download(
         return PresignedDownloadResponse(url=url, expires_in_seconds=ttl)
     except (PresigningNotSupportedError, StorageNotFoundError, StorageOperationError) as error:
         raise _presigning_error(error) from error
+
+
+@router.post(
+    "/reconciliation-runs/{run_id}/files/finalize",
+    response_model=SourceFileMetadataResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Finalize a direct object-storage upload",
+    description="Verifies tenant ownership, authoritative metadata, checksum, and file contents before persistence.",
+    responses=ERROR_RESPONSES | {503: {"model": ErrorResponse}},
+)
+def finalize_direct_upload(
+    run_id: uuid.UUID,
+    payload: DirectUploadFinalizationRequest,
+    session: SessionDependency,
+    storage: FileStorageDependency,
+    tenant: ReconciliationOperatorDependency,
+) -> SourceFileMetadataResponse:
+    owned_object = False
+    try:
+        with PersistenceUnitOfWork(session) as work:
+            run = work.runs.get(run_id, organization_id=tenant.organization_id, lock=True)
+            if run.status != "PENDING":
+                raise APIError(status_code=409, code="RUN_NOT_PENDING", message="Files can only be finalized for a pending reconciliation run.")
+            if not storage.belongs_to_namespace(payload.storage_key, namespace=str(tenant.organization_id)):
+                raise APIError(status_code=404, code="FILE_NOT_FOUND", message="The requested file does not exist.")
+            existing = work.source_files.find_by_storage_key(
+                payload.storage_key, organization_id=tenant.organization_id
+            )
+            if existing is not None:
+                if existing.run_id == run_id and existing.source_type == payload.source_type.value:
+                    return _response(existing)
+                raise APIError(status_code=409, code="FILE_ALREADY_FINALIZED", message="The uploaded file has already been finalized.")
+            owned_object = True
+            metadata = storage.stat(payload.storage_key)
+            if metadata.size_bytes != payload.size_bytes or metadata.size_bytes > storage.max_size_bytes:
+                raise APIError(status_code=422, code="FILE_METADATA_MISMATCH", message="The uploaded file metadata could not be verified.")
+            if metadata.content_type and metadata.content_type != payload.content_type:
+                raise APIError(status_code=422, code="FILE_METADATA_MISMATCH", message="The uploaded file metadata could not be verified.")
+            if metadata.checksum_sha256 and metadata.checksum_sha256 != payload.checksum_sha256:
+                raise APIError(status_code=422, code="FILE_METADATA_MISMATCH", message="The uploaded file metadata could not be verified.")
+            with storage.materialize(payload.storage_key) as path:
+                inspected = storage.inspect_materialized(
+                    path, original_filename=payload.original_filename,
+                    storage_key=payload.storage_key,
+                )
+            if (
+                inspected.size_bytes != payload.size_bytes
+                or inspected.content_type != payload.content_type
+                or inspected.checksum_sha256 != payload.checksum_sha256
+            ):
+                raise APIError(status_code=422, code="FILE_VALIDATION_FAILED", message="The uploaded file failed integrity validation.")
+            record = work.source_files.add(
+                run_id=run_id, source_type=payload.source_type.value,
+                original_filename=inspected.original_filename,
+                checksum_sha256=inspected.checksum_sha256,
+                size_bytes=inspected.size_bytes, content_type=inspected.content_type,
+                storage_key=payload.storage_key,
+            )
+            work.security_audit_events.append(
+                organization_id=tenant.organization_id, actor_user_id=tenant.user_id,
+                event_type="DIRECT_UPLOAD_FINALIZED",
+                details={"run_id": str(run_id), "file_id": str(record.id), "source_type": record.source_type},
+            )
+        return _response(record)
+    except APIError as error:
+        if owned_object:
+            storage.delete(payload.storage_key)
+        raise
+    except (EmptyUploadError, UploadTooLargeError, UnsupportedUploadError, InvalidStorageKeyError) as error:
+        if owned_object:
+            storage.delete(payload.storage_key)
+        raise APIError(status_code=422, code="FILE_VALIDATION_FAILED", message="The uploaded file failed integrity validation.") from error
+    except StorageNotFoundError as error:
+        raise APIError(status_code=404, code="FILE_NOT_FOUND", message="The requested file does not exist.") from error
+    except StorageOperationError as error:
+        raise APIError(status_code=503, code="STORAGE_UNAVAILABLE", message="Object storage is temporarily unavailable.") from error
+    except Exception:
+        if owned_object:
+            storage.delete(payload.storage_key)
+        raise

@@ -123,12 +123,46 @@ class LocalFileStorage:
         yield self.resolve(storage_key)
 
     def create_upload_url(
-        self, *, namespace: str, filename: str, content_type: str, expires_seconds: int
+        self, *, namespace: str, filename: str, content_type: str,
+        checksum_sha256: str | None = None, expires_seconds: int
     ) -> tuple[str, str, dict[str, str]]:
         raise PresigningNotSupportedError("direct object access is unavailable")
 
     def create_download_url(self, storage_key: str, *, expires_seconds: int) -> str:
         raise PresigningNotSupportedError("direct object access is unavailable")
+
+    def belongs_to_namespace(self, storage_key: str, *, namespace: str) -> bool:
+        self.resolve(storage_key, require_exists=False)
+        prefix = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:16]
+        return storage_key.startswith(f"{prefix}-")
+
+    def inspect_materialized(
+        self, path: Path, *, original_filename: str, storage_key: str
+    ) -> StoredUpload:
+        safe_name, extension = self._validated_filename(original_filename)
+        try:
+            size = path.stat().st_size
+            if size == 0:
+                raise EmptyUploadError("upload is empty")
+            if size > self.max_size_bytes:
+                raise UploadTooLargeError("upload exceeds configured size limit")
+            digest = hashlib.sha256()
+            first_chunk = b""
+            with path.open("rb") as source:
+                while chunk := source.read(self._CHUNK_SIZE):
+                    if not first_chunk:
+                        first_chunk = chunk
+                    digest.update(chunk)
+            self._validate_contents(path, extension, first_chunk)
+            return StoredUpload(
+                storage_key=storage_key, original_filename=safe_name,
+                content_type=self._CONTENT_TYPES[extension], size_bytes=size,
+                checksum_sha256=digest.hexdigest(),
+            )
+        except (EmptyUploadError, UploadTooLargeError, UnsupportedUploadError):
+            raise
+        except OSError as error:
+            raise StorageOperationError("the storage operation could not be completed") from error
 
     def resolve(self, storage_key: str, *, require_exists: bool = True) -> Path:
         """Resolve a server-generated key without allowing traversal."""

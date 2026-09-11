@@ -41,6 +41,8 @@ class StoredUpload:
 class StorageObjectMetadata:
     storage_key: str
     size_bytes: int
+    content_type: str | None = None
+    checksum_sha256: str | None = None
 
 
 class UploadStream(Protocol):
@@ -57,6 +59,8 @@ class UploadStream(Protocol):
 class FileStorage(Protocol):
     """Minimal private-object contract implemented by every provider."""
 
+    max_size_bytes: int
+
     async def save(
         self, upload: UploadStream, *, namespace: str | None = None
     ) -> StoredUpload: ...
@@ -72,7 +76,14 @@ class FileStorage(Protocol):
     def materialize(self, storage_key: str) -> AbstractContextManager[Path]: ...
 
     def create_upload_url(
-        self, *, namespace: str, filename: str, content_type: str, expires_seconds: int
+        self, *, namespace: str, filename: str, content_type: str,
+        checksum_sha256: str | None = None, expires_seconds: int
     ) -> tuple[str, str, dict[str, str]]: ...
 
     def create_download_url(self, storage_key: str, *, expires_seconds: int) -> str: ...
+
+    def belongs_to_namespace(self, storage_key: str, *, namespace: str) -> bool: ...
+
+    def inspect_materialized(
+        self, path: Path, *, original_filename: str, storage_key: str
+    ) -> StoredUpload: ...

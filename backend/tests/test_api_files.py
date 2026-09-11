@@ -5,6 +5,7 @@ import io
 import uuid
 
 import pytest
+from fastapi import UploadFile
 from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 
@@ -144,7 +145,7 @@ async def test_local_provider_rejects_direct_object_urls_safely(file_app):
         run_id = await _create_run(client)
         upload_url = await client.post(
             f"/api/v1/reconciliation-runs/{run_id}/files/presigned-upload",
-            json={"filename": "bank.csv", "content_type": "text/csv"},
+            json={"filename": "bank.csv", "content_type": "text/csv", "checksum_sha256": "a" * 64},
         )
         uploaded = await _upload(client, run_id)
         download_url = await client.post(
@@ -154,6 +155,56 @@ async def test_local_provider_rejects_direct_object_urls_safely(file_app):
     assert upload_url.json()["error"]["code"] == "DIRECT_STORAGE_UNAVAILABLE"
     assert download_url.status_code == 409
     assert download_url.json()["error"]["code"] == "DIRECT_STORAGE_UNAVAILABLE"
+
+
+@pytest.mark.anyio
+async def test_direct_upload_finalization_verifies_and_persists_object(file_app):
+    content = b"id,amount\n1,10.00\n"
+    stored = await file_app.state.file_storage.save(
+        UploadFile(filename="bank.csv", file=io.BytesIO(content)),
+        namespace=str(TEST_ORGANIZATION_ID),
+    )
+    payload = {
+        "storage_key": stored.storage_key,
+        "source_type": "BANK_TRANSACTIONS",
+        "original_filename": "bank.csv",
+        "content_type": "text/csv",
+        "size_bytes": len(content),
+        "checksum_sha256": hashlib.sha256(content).hexdigest(),
+    }
+    async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
+        run_id = await _create_run(client)
+        first = await client.post(f"/api/v1/reconciliation-runs/{run_id}/files/finalize", json=payload)
+        repeated = await client.post(f"/api/v1/reconciliation-runs/{run_id}/files/finalize", json=payload)
+    assert first.status_code == 201
+    assert first.json()["checksum_sha256"] == payload["checksum_sha256"]
+    assert repeated.status_code == 201
+    assert repeated.json()["id"] == first.json()["id"]
+
+
+@pytest.mark.anyio
+async def test_failed_direct_upload_finalization_removes_owned_invalid_object(file_app):
+    content = b"id,amount\n1,10.00\n"
+    stored = await file_app.state.file_storage.save(
+        UploadFile(filename="bank.csv", file=io.BytesIO(content)),
+        namespace=str(TEST_ORGANIZATION_ID),
+    )
+    async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
+        run_id = await _create_run(client)
+        response = await client.post(
+            f"/api/v1/reconciliation-runs/{run_id}/files/finalize",
+            json={
+                "storage_key": stored.storage_key,
+                "source_type": "BANK_TRANSACTIONS",
+                "original_filename": "bank.csv",
+                "content_type": "text/csv",
+                "size_bytes": len(content),
+                "checksum_sha256": "0" * 64,
+            },
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "FILE_VALIDATION_FAILED"
+    assert not file_app.state.file_storage.exists(stored.storage_key)
 
 
 @pytest.mark.anyio
