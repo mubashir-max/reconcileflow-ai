@@ -84,6 +84,7 @@ def _membership_response(membership) -> MembershipResponse:
 )
 def register(
     request: RegistrationRequest,
+    http_request: Request,
     session: SessionDependency,
     passwords: PasswordManagerDependency,
 ) -> RegistrationResponse:
@@ -101,7 +102,12 @@ def register(
             password_hash=password_hash,
             display_name=request.display_name,
         )
-        organization = work.organizations.create(name=request.organization_name, slug=slug)
+        configured_quota = http_request.app.state.settings.default_organization_storage_quota_bytes
+        organization = work.organizations.create(
+            name=request.organization_name,
+            slug=slug,
+            storage_quota_bytes=configured_quota or None,
+        )
         membership = work.memberships.create(
             organization_id=organization.id, user_id=user.id, role="OWNER"
         )

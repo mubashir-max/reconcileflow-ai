@@ -6,7 +6,7 @@ import uuid
 
 from fastapi import APIRouter
 
-from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency
+from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency, StorageQuotaExceededError
 
 from ..auth_dependencies import CurrentUserDependency, MembershipManagerDependency, TenantContextDependency
 from ..errors import APIError
@@ -15,6 +15,8 @@ from ..organization_schemas import (
     OrganizationListResponse,
     OrganizationProfileResponse,
     UpdateOrganizationRequest,
+    OrganizationStorageUsageResponse,
+    UpdateOrganizationStorageQuotaRequest,
 )
 from ..schemas import ErrorResponse
 
@@ -112,3 +114,42 @@ def update_organization(
             details={"previous_name": previous_name, "new_name": record.name},
         )
     return _profile(record, manager.role)
+
+
+def _storage_usage(record) -> OrganizationStorageUsageResponse:
+    remaining = None if record.storage_quota_bytes is None else max(record.storage_quota_bytes - record.storage_used_bytes, 0)
+    utilization = None if record.storage_quota_bytes is None else (
+        100.0 if record.storage_quota_bytes == 0 else min(100.0, record.storage_used_bytes * 100 / record.storage_quota_bytes)
+    )
+    return OrganizationStorageUsageResponse(
+        organization_id=record.id, used_bytes=record.storage_used_bytes,
+        quota_bytes=record.storage_quota_bytes, remaining_bytes=remaining,
+        utilization_percent=utilization,
+    )
+
+
+@router.get("/{organization_id}/storage-usage", response_model=OrganizationStorageUsageResponse, responses=ERROR_RESPONSES)
+def get_storage_usage(organization_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency) -> OrganizationStorageUsageResponse:
+    _ensure_selected(organization_id, tenant.organization_id)
+    return _storage_usage(PersistenceUnitOfWork(session).organizations.get(organization_id))
+
+
+@router.patch("/{organization_id}/storage-quota", response_model=OrganizationStorageUsageResponse, responses=ERROR_RESPONSES)
+def update_storage_quota(
+    organization_id: uuid.UUID, request: UpdateOrganizationStorageQuotaRequest,
+    session: SessionDependency, manager: MembershipManagerDependency,
+) -> OrganizationStorageUsageResponse:
+    _ensure_selected(organization_id, manager.organization_id)
+    try:
+        with PersistenceUnitOfWork(session) as work:
+            record = work.organizations.get(organization_id, lock=True)
+            previous = record.storage_quota_bytes
+            work.organizations.update_storage_quota(record, request.quota_bytes)
+            work.security_audit_events.append(
+                organization_id=organization_id, actor_user_id=manager.user_id,
+                event_type="ORGANIZATION_STORAGE_QUOTA_UPDATED",
+                details={"previous_quota_bytes": previous, "new_quota_bytes": record.storage_quota_bytes},
+            )
+    except StorageQuotaExceededError as error:
+        raise APIError(status_code=409, code="STORAGE_QUOTA_BELOW_USAGE", message="The quota cannot be lower than current storage usage.") from error
+    return _storage_usage(record)

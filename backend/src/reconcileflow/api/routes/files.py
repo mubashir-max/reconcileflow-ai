@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 
-from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency
+from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency, StorageQuotaExceededError
 from reconcileflow.storage import (
     EmptyUploadError,
     InvalidStorageKeyError,
@@ -104,7 +104,12 @@ async def upload_source_file(
                 content_type=stored.content_type,
                 storage_key=stored.storage_key,
             )
+            work.organizations.apply_storage_delta(tenant.organization_id, stored.size_bytes)
         return _response(record)
+    except StorageQuotaExceededError as error:
+        if stored is not None:
+            storage.delete(stored.storage_key)
+        raise APIError(status_code=413, code="STORAGE_QUOTA_EXCEEDED", message="The organization storage quota has been exceeded.") from error
     except Exception:
         if stored is not None:
             storage.delete(stored.storage_key)
@@ -164,7 +169,9 @@ def delete_source_file(
                 raise
             except StorageOperationError as error:
                 raise APIError(status_code=503, code="STORAGE_UNAVAILABLE", message="Object storage is temporarily unavailable.") from error
+        size_bytes = record.size_bytes
         work.source_files.remove(record)
+        work.organizations.apply_storage_delta(tenant.organization_id, -size_bytes)
         work.security_audit_events.append(
             organization_id=tenant.organization_id,
             actor_user_id=tenant.user_id,
@@ -205,6 +212,11 @@ def create_presigned_upload(
             run = work.runs.get(run_id, organization_id=tenant.organization_id)
             if run.status != "PENDING":
                 raise APIError(status_code=409, code="RUN_NOT_PENDING", message="Files can only be uploaded to a pending reconciliation run.")
+            if payload.size_bytes > storage.max_size_bytes:
+                raise APIError(status_code=413, code="FILE_TOO_LARGE", message="The uploaded file exceeds the allowed size.")
+            organization = work.organizations.get(tenant.organization_id, lock=True)
+            if organization.storage_quota_bytes is not None and organization.storage_used_bytes + payload.size_bytes > organization.storage_quota_bytes:
+                raise APIError(status_code=413, code="STORAGE_QUOTA_EXCEEDED", message="The organization storage quota has been exceeded.")
             key, url, fields = storage.create_upload_url(
                 namespace=str(tenant.organization_id), filename=payload.filename,
                 content_type=payload.content_type,
@@ -307,12 +319,17 @@ def finalize_direct_upload(
                 size_bytes=inspected.size_bytes, content_type=inspected.content_type,
                 storage_key=payload.storage_key,
             )
+            work.organizations.apply_storage_delta(tenant.organization_id, inspected.size_bytes)
             work.security_audit_events.append(
                 organization_id=tenant.organization_id, actor_user_id=tenant.user_id,
                 event_type="DIRECT_UPLOAD_FINALIZED",
                 details={"run_id": str(run_id), "file_id": str(record.id), "source_type": record.source_type},
             )
         return _response(record)
+    except StorageQuotaExceededError as error:
+        if owned_object:
+            storage.delete(payload.storage_key)
+        raise APIError(status_code=413, code="STORAGE_QUOTA_EXCEEDED", message="The organization storage quota has been exceeded.") from error
     except APIError as error:
         if owned_object:
             storage.delete(payload.storage_key)

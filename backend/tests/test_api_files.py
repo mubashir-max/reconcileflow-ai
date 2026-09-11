@@ -83,6 +83,33 @@ async def test_upload_csv_persists_safe_metadata_and_file(file_app):
 
 
 @pytest.mark.anyio
+async def test_upload_enforces_and_accounts_for_organization_storage_quota(file_app):
+    content = b"id,amount\n1,10.00\n"
+    with file_app.state.database.session() as session:
+        organization = session.get(OrganizationRecord, TEST_ORGANIZATION_ID)
+        organization.storage_quota_bytes = len(content)
+        session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
+        first_run = await _create_run(client)
+        uploaded = await _upload(client, first_run, content=content)
+        usage = await client.get(f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/storage-usage")
+        second_run = await _create_run(client)
+        rejected = await _upload(client, second_run, content=content)
+        deleted = await client.delete(f"/api/v1/files/{uploaded.json()['id']}")
+        usage_after_delete = await client.get(f"/api/v1/organizations/{TEST_ORGANIZATION_ID}/storage-usage")
+
+    assert uploaded.status_code == 201
+    assert usage.json()["used_bytes"] == len(content)
+    assert usage.json()["remaining_bytes"] == 0
+    assert rejected.status_code == 413
+    assert rejected.json()["error"]["code"] == "STORAGE_QUOTA_EXCEEDED"
+    assert deleted.status_code == 204
+    assert usage_after_delete.json()["used_bytes"] == 0
+    assert not list(file_app.state.file_storage.directory.iterdir())
+
+
+@pytest.mark.anyio
 async def test_upload_valid_xlsx(file_app):
     async with AsyncClient(transport=ASGITransport(app=file_app, raise_app_exceptions=False), base_url="http://test") as client:
         run_id = await _create_run(client)

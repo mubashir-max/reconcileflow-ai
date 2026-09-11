@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from reconcileflow.audit import AuditEvent
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationResult
 
-from .errors import InvalidStatusTransitionError, PersistenceConflictError, RecordNotFoundError
+from .errors import InvalidStatusTransitionError, PersistenceConflictError, RecordNotFoundError, StorageQuotaExceededError
 from .models import (
     AuditEventRecord,
     BACKGROUND_JOB_STATUSES,
@@ -62,8 +62,8 @@ class OrganizationRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def create(self, *, name: str, slug: str) -> OrganizationRecord:
-        record = OrganizationRecord(name=name.strip(), slug=slug)
+    def create(self, *, name: str, slug: str, storage_quota_bytes: int | None = 10 * 1024 * 1024 * 1024) -> OrganizationRecord:
+        record = OrganizationRecord(name=name.strip(), slug=slug, storage_quota_bytes=storage_quota_bytes)
         self._session.add(record)
         self._session.flush()
         return record
@@ -71,14 +71,35 @@ class OrganizationRepository:
     def slug_exists(self, slug: str) -> bool:
         return self._session.scalar(select(OrganizationRecord.id).where(OrganizationRecord.slug == slug)) is not None
 
-    def get(self, organization_id: uuid.UUID) -> OrganizationRecord:
-        record = self._session.get(OrganizationRecord, organization_id)
+    def get(self, organization_id: uuid.UUID, *, lock: bool = False) -> OrganizationRecord:
+        statement = select(OrganizationRecord).where(OrganizationRecord.id == organization_id)
+        if lock:
+            statement = statement.with_for_update()
+        record = self._session.scalar(statement)
         if record is None:
             raise RecordNotFoundError(f"organization {organization_id} was not found")
         return record
 
     def update_name(self, record: OrganizationRecord, name: str) -> OrganizationRecord:
         record.name = name.strip()
+        self._session.flush()
+        return record
+
+    def update_storage_quota(self, record: OrganizationRecord, quota_bytes: int | None) -> OrganizationRecord:
+        if quota_bytes is not None and quota_bytes < record.storage_used_bytes:
+            raise StorageQuotaExceededError("storage quota cannot be lower than current usage")
+        record.storage_quota_bytes = quota_bytes
+        self._session.flush()
+        return record
+
+    def apply_storage_delta(self, organization_id: uuid.UUID, delta_bytes: int) -> OrganizationRecord:
+        record = self.get(organization_id, lock=True)
+        updated = record.storage_used_bytes + delta_bytes
+        if updated < 0:
+            updated = 0
+        if record.storage_quota_bytes is not None and updated > record.storage_quota_bytes:
+            raise StorageQuotaExceededError("organization storage quota exceeded")
+        record.storage_used_bytes = updated
         self._session.flush()
         return record
 

@@ -3,7 +3,7 @@
 from .base import Base
 from .database import Database
 from .dependencies import DatabaseDependency, SessionDependency, get_database, get_db_session
-from .errors import InvalidStatusTransitionError, PersistenceConflictError, PersistenceError, RecordNotFoundError
+from .errors import InvalidStatusTransitionError, PersistenceConflictError, PersistenceError, RecordNotFoundError, StorageQuotaExceededError
 from .models import (
     AuditEventRecord,
     BACKGROUND_JOB_EVENT_TYPES,
@@ -71,6 +71,7 @@ __all__ = [
     "PersistenceError",
     "PersistenceUnitOfWork",
     "RecordNotFoundError",
+    "StorageQuotaExceededError",
     "ReconciliationResultRecord",
     "ReconciliationResultRepository",
     "ReconciliationRunRecord",

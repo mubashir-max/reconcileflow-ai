@@ -46,3 +46,15 @@ class UpdateOrganizationRequest(StrictModel):
         if not normalized:
             raise ValueError("organization name must not be blank")
         return normalized
+
+
+class OrganizationStorageUsageResponse(StrictModel):
+    organization_id: uuid.UUID
+    used_bytes: int = Field(ge=0)
+    quota_bytes: int | None = Field(default=None, ge=0)
+    remaining_bytes: int | None = Field(default=None, ge=0)
+    utilization_percent: float | None = Field(default=None, ge=0, le=100)
+
+
+class UpdateOrganizationStorageQuotaRequest(StrictModel):
+    quota_bytes: int | None = Field(default=None, ge=0)

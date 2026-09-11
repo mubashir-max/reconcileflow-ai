@@ -57,6 +57,7 @@ class APISettings(BaseSettings):
     presigned_url_ttl_seconds: int = Field(default=300, ge=60, le=900)
     abandoned_upload_retention_hours: int = Field(default=24, ge=1, le=720)
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
+    default_organization_storage_quota_bytes: int = Field(default=10 * 1024 * 1024 * 1024, ge=0)
     token_signing_secret: SecretStr = SecretStr("development-only-change-this-token-secret")
     token_issuer: str = Field(default="reconcileflow-api", min_length=1, max_length=200)
     token_audience: str = Field(default="reconcileflow-clients", min_length=1, max_length=200)

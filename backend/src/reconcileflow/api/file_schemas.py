@@ -40,6 +40,7 @@ class PresignedUploadRequest(StrictModel):
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(min_length=1, max_length=200)
     checksum_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(default=1, ge=1)
 
 
 class PresignedUploadResponse(StrictModel):
