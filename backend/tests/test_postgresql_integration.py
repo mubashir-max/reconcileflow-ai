@@ -52,6 +52,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "refresh_tokens",
             "security_audit_events",
             "background_jobs",
+            "workers",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
 
@@ -151,6 +152,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
                 clock=lambda: scheduled_at + timedelta(seconds=1),
             )
             assert integration_worker.run_once() is True
+            worker_ready = await client.get("/api/v1/health/worker-ready")
             results = await client.get(f"/api/v1/reconciliation-runs/{run_id}/results")
             audit = await client.get(f"/api/v1/reconciliation-runs/{run_id}/audit-events")
             job_detail = await client.get(
@@ -290,6 +292,8 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert member_removed.status_code == 204
         assert created.status_code == 201
         assert executed.status_code == 202
+        assert worker_ready.status_code == 200
+        assert worker_ready.json()["active_workers"] >= 1
         assert executed.json()["status"] == "QUEUED"
         assert datetime.fromisoformat(executed.json()["scheduled_at"]) == scheduled_at
         assert results.json()["total"] == 8

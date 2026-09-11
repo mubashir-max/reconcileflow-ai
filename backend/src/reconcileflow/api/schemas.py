@@ -26,6 +26,12 @@ class HealthResponse(StrictResponse):
     environment: Environment
 
 
+class WorkerHealthResponse(StrictResponse):
+    status: str
+    active_workers: int = Field(ge=0)
+    stale_workers: int = Field(ge=0)
+
+
 class ErrorBody(StrictResponse):
     code: str
     message: str

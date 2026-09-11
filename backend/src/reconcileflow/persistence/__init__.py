@@ -19,6 +19,7 @@ from .models import (
     SecurityAuditEventRecord,
     SourceFileRecord,
     UserRecord,
+    WorkerRecord,
 )
 from .repositories import (
     AuditEventRepository,
@@ -33,6 +34,7 @@ from .repositories import (
     SecurityAuditEventRepository,
     SourceFileRepository,
     UserRepository,
+    WorkerRepository,
 )
 from .unit_of_work import PersistenceUnitOfWork
 
@@ -71,7 +73,9 @@ __all__ = [
     "SourceFileRecord",
     "SourceFileRepository",
     "UserRecord",
+    "WorkerRecord",
     "UserRepository",
+    "WorkerRepository",
     "get_database",
     "get_db_session",
 ]

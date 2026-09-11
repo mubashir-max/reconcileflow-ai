@@ -20,6 +20,7 @@ from .repositories import (
     SecurityAuditEventRepository,
     SourceFileRepository,
     UserRepository,
+    WorkerRepository,
 )
 
 
@@ -39,6 +40,7 @@ class PersistenceUnitOfWork:
         self.memberships = OrganizationMembershipRepository(session)
         self.refresh_tokens = RefreshTokenRepository(session)
         self.security_audit_events = SecurityAuditEventRepository(session)
+        self.workers = WorkerRepository(session)
         self._active = False
 
     def __enter__(self) -> PersistenceUnitOfWork:

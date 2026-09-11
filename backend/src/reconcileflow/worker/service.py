@@ -59,6 +59,7 @@ class WorkerContext:
     ) -> None:
         with self._session_provider() as session:
             with PersistenceUnitOfWork(session) as work:
+                work.workers.heartbeat(self._worker_id, at=at)
                 record = work.background_jobs.heartbeat(
                     job.id,
                     organization_id=job.organization_id,
@@ -117,6 +118,7 @@ class BackgroundWorker:
         now = self._now()
         with self._session_provider() as session:
             with PersistenceUnitOfWork(session) as work:
+                work.workers.heartbeat(self._worker_id, at=now)
                 recovered = work.background_jobs.recover_stale(
                     stale_before=now - self._stale_timeout,
                     at=now,
@@ -155,12 +157,18 @@ class BackgroundWorker:
     def run_forever(self, stop_event: threading.Event) -> None:
         """Poll until shutdown is requested, without delaying signal handling."""
         logger.info("Background worker %s started", self._worker_id)
+        with self._session_provider() as session:
+            with PersistenceUnitOfWork(session) as work:
+                work.workers.heartbeat(self._worker_id, at=self._now())
         try:
             while not stop_event.is_set():
                 processed = self.run_once()
                 if not processed:
                     stop_event.wait(self._poll_interval_seconds)
         finally:
+            with self._session_provider() as session:
+                with PersistenceUnitOfWork(session) as work:
+                    work.workers.stop(self._worker_id, at=self._now())
             logger.info("Background worker %s stopped", self._worker_id)
 
     def _finish_successfully(self, job: WorkerJob) -> None:

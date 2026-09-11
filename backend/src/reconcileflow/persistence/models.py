@@ -37,6 +37,7 @@ class BackgroundJobStatus(StrEnum):
 
 
 BACKGROUND_JOB_STATUSES = tuple(status.value for status in BackgroundJobStatus)
+WORKER_STATUSES = ("RUNNING", "STOPPED")
 
 
 class OrganizationRecord(Base):
@@ -228,6 +229,22 @@ class BackgroundJobRecord(Base):
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="background_jobs")
     run: Mapped[ReconciliationRunRecord] = relationship(back_populates="background_job")
+
+
+class WorkerRecord(Base):
+    """Internal worker lifecycle state; never returned with its identifier publicly."""
+
+    __tablename__ = "workers"
+    __table_args__ = (
+        CheckConstraint(f"status IN {WORKER_STATUSES}", name="valid_status"),
+        Index("ix_workers_status_heartbeat", "status", "heartbeat_at"),
+    )
+
+    worker_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="RUNNING")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SourceFileRecord(Base):

@@ -46,3 +46,14 @@ class BackgroundJobListResponse(StrictModel):
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)
+
+
+class BackgroundJobQueueSummary(StrictModel):
+    queued: int = Field(ge=0)
+    running: int = Field(ge=0)
+    retrying: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    cancel_requested: int = Field(ge=0)
+    cancelled: int = Field(ge=0)
+    oldest_eligible_age_seconds: int | None = Field(default=None, ge=0)

@@ -17,6 +17,7 @@ from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationRes
 from .errors import InvalidStatusTransitionError, PersistenceConflictError, RecordNotFoundError
 from .models import (
     AuditEventRecord,
+    BACKGROUND_JOB_STATUSES,
     BackgroundJobRecord,
     BackgroundJobStatus,
     ConfigurationSnapshotRecord,
@@ -29,6 +30,7 @@ from .models import (
     RESULT_STATUSES,
     SourceFileRecord,
     UserRecord,
+    WorkerRecord,
 )
 
 
@@ -469,6 +471,38 @@ class BackgroundJobRepository:
             )
         return int(self._session.scalar(statement) or 0)
 
+    def summarize(self, *, organization_id: uuid.UUID, at: datetime | None = None) -> dict[str, Any]:
+        now = _utc(at or datetime.now(UTC))
+        rows = self._session.execute(
+            select(BackgroundJobRecord.status, func.count()).where(
+                BackgroundJobRecord.organization_id == organization_id
+            ).group_by(BackgroundJobRecord.status)
+        ).all()
+        counts = {status: 0 for status in BACKGROUND_JOB_STATUSES}
+        counts.update({str(status): int(count) for status, count in rows})
+        retrying = int(self._session.scalar(
+            select(func.count()).select_from(BackgroundJobRecord).where(
+                BackgroundJobRecord.organization_id == organization_id,
+                BackgroundJobRecord.status == BackgroundJobStatus.QUEUED.value,
+                BackgroundJobRecord.retry_at.is_not(None),
+            )
+        ) or 0)
+        oldest = self._session.scalar(
+            select(func.min(BackgroundJobRecord.scheduled_at)).where(
+                BackgroundJobRecord.organization_id == organization_id,
+                BackgroundJobRecord.status == BackgroundJobStatus.QUEUED.value,
+                BackgroundJobRecord.scheduled_at <= now,
+                or_(BackgroundJobRecord.retry_at.is_(None), BackgroundJobRecord.retry_at <= now),
+            )
+        )
+        if oldest is not None and (oldest.tzinfo is None or oldest.utcoffset() is None):
+            oldest = oldest.replace(tzinfo=UTC)
+        return {
+            "counts": counts,
+            "retrying": retrying,
+            "oldest_eligible_age_seconds": None if oldest is None else max(0, int((now - oldest).total_seconds())),
+        }
+
     def claim_next(
         self,
         *,
@@ -720,6 +754,58 @@ class BackgroundJobRepository:
             return BackgroundJobStatus(status).value
         except ValueError as error:
             raise ValueError("invalid background job status") from error
+
+
+class WorkerRepository:
+    """Internal worker lifecycle and aggregate health operations."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def heartbeat(self, worker_id: str, *, at: datetime | None = None) -> WorkerRecord:
+        occurred_at = _utc(at or datetime.now(UTC))
+        record = self._session.get(WorkerRecord, worker_id)
+        if record is None:
+            record = WorkerRecord(
+                worker_id=worker_id,
+                status="RUNNING",
+                started_at=occurred_at,
+                heartbeat_at=occurred_at,
+            )
+            self._session.add(record)
+        else:
+            if record.status == "STOPPED":
+                record.started_at = occurred_at
+            record.status = "RUNNING"
+            record.heartbeat_at = occurred_at
+            record.stopped_at = None
+        self._session.flush()
+        return record
+
+    def stop(self, worker_id: str, *, at: datetime | None = None) -> WorkerRecord:
+        record = self._session.get(WorkerRecord, worker_id)
+        if record is None:
+            raise RecordNotFoundError("worker was not found")
+        stopped_at = _utc(at or datetime.now(UTC))
+        record.status = "STOPPED"
+        record.heartbeat_at = stopped_at
+        record.stopped_at = stopped_at
+        self._session.flush()
+        return record
+
+    def health_counts(self, *, stale_before: datetime) -> tuple[int, int]:
+        cutoff = _utc(stale_before)
+        active = int(self._session.scalar(
+            select(func.count()).select_from(WorkerRecord).where(
+                WorkerRecord.status == "RUNNING", WorkerRecord.heartbeat_at > cutoff
+            )
+        ) or 0)
+        stale = int(self._session.scalar(
+            select(func.count()).select_from(WorkerRecord).where(
+                WorkerRecord.status == "RUNNING", WorkerRecord.heartbeat_at <= cutoff
+            )
+        ) or 0)
+        return active, stale
 
 class SourceFileRepository:
     def __init__(self, session: Session) -> None:

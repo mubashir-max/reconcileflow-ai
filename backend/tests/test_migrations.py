@@ -26,7 +26,7 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path) -> None:
         "alembic_version", "audit_events", "configuration_snapshots",
         "reconciliation_results", "reconciliation_runs", "source_files",
         "organizations", "organization_memberships", "users", "refresh_tokens",
-        "security_audit_events", "background_jobs",
+        "security_audit_events", "background_jobs", "workers",
     }
     engine.dispose()
 
@@ -170,6 +170,24 @@ def test_worker_leases_can_add_and_remove_manual_retry_tracking(tmp_path: Path) 
     engine = create_engine(database_url)
     columns = {column["name"] for column in inspect(engine).get_columns("background_jobs")}
     assert not {"total_attempt_count", "manual_retry_count", "last_manual_retry_at"} & columns
+    engine.dispose()
+
+
+def test_manual_retries_can_add_and_remove_worker_lifecycle(tmp_path: Path) -> None:
+    database_path = tmp_path / "worker-lifecycle-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+    command.upgrade(config, "f7b3c9d42e61")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    assert "workers" in inspect(engine).get_table_names()
+    assert {"worker_id", "status", "started_at", "heartbeat_at", "stopped_at"} <= {
+        column["name"] for column in inspect(engine).get_columns("workers")
+    }
+    engine.dispose()
+    command.downgrade(config, "f7b3c9d42e61")
+    engine = create_engine(database_url)
+    assert "workers" not in inspect(engine).get_table_names()
     engine.dispose()
 
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:

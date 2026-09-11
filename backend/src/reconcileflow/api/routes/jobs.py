@@ -11,7 +11,7 @@ from reconcileflow.persistence.errors import InvalidStatusTransitionError
 
 from ..auth_dependencies import ReconciliationOperatorDependency, TenantContextDependency
 from ..errors import APIError
-from ..job_schemas import BackgroundJobListResponse, BackgroundJobResponse, BackgroundJobStatusValue
+from ..job_schemas import BackgroundJobListResponse, BackgroundJobQueueSummary, BackgroundJobResponse, BackgroundJobStatusValue
 from ..schemas import ErrorResponse
 
 
@@ -80,6 +80,27 @@ def list_background_jobs(
         ),
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/summary", response_model=BackgroundJobQueueSummary, responses=ERROR_RESPONSES)
+def get_background_job_summary(
+    session: SessionDependency,
+    tenant: TenantContextDependency,
+) -> BackgroundJobQueueSummary:
+    summary = PersistenceUnitOfWork(session).background_jobs.summarize(
+        organization_id=tenant.organization_id
+    )
+    counts = summary["counts"]
+    return BackgroundJobQueueSummary(
+        queued=counts["QUEUED"],
+        running=counts["RUNNING"],
+        retrying=summary["retrying"],
+        succeeded=counts["SUCCEEDED"],
+        failed=counts["FAILED"],
+        cancel_requested=counts["CANCEL_REQUESTED"],
+        cancelled=counts["CANCELLED"],
+        oldest_eligible_age_seconds=summary["oldest_eligible_age_seconds"],
     )
 
 

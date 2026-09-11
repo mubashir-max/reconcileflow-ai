@@ -289,9 +289,11 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `GET /api/v1/files/{file_id}` | Retrieve one file's safe metadata. |
 | `POST /api/v1/reconciliation-runs/{run_id}/execute` | Queue a pending run immediately or at a future UTC time. |
 | `GET /api/v1/background-jobs` | List organization jobs with pagination and status filtering. |
+| `GET /api/v1/background-jobs/summary` | Retrieve safe organization-scoped queue totals and wait age. |
 | `GET /api/v1/background-jobs/{job_id}` | Retrieve safe job progress and lifecycle details. |
 | `POST /api/v1/background-jobs/{job_id}/cancel` | Cancel a queued job or request cancellation of a running job. |
 | `POST /api/v1/background-jobs/{job_id}/retry` | Safely requeue a failed job without changing its identity. |
+| `GET /api/v1/health/worker-ready` | Report aggregate worker availability without infrastructure identifiers. |
 | `GET /api/v1/reconciliation-runs/{run_id}/results` | List and filter persisted results. |
 | `GET /api/v1/results/{result_id}` | Retrieve one explainable result. |
 | `GET /api/v1/reconciliation-runs/{run_id}/audit-events` | Retrieve ordered audit events. |
@@ -314,6 +316,8 @@ The easiest way to learn the workflow is through `/docs`: open each endpoint, se
 Bank and ERP inputs are required. One file of each source type is allowed per pending run. The execution endpoint returns HTTP `202 Accepted`; reconciliation runs in the separate worker process. Supply an optional timezone-aware `scheduled_at` value to delay execution for up to 365 days. Duplicate jobs are rejected. Job responses intentionally omit worker identities, heartbeats, storage paths, and raw exceptions. Results support `limit`, `offset`, `status`, and `requires_review` query parameters.
 
 OWNER, ADMIN, and ANALYST members can manually retry a failed job up to `RECONCILEFLOW_MAX_MANUAL_JOB_RETRIES` times. A retry retains the job ID and lifetime attempt count, resets only the current attempt cycle, and is refused if results already exist or the job is not terminally failed.
+
+Workers persist internal lifecycle heartbeats. Tenant APIs expose only aggregate queue counts and eligible wait age; health responses expose only active and stale worker totals. Worker names, hostnames, process IDs, and connection details remain internal.
 
 Docker Compose starts the worker automatically. For a directly installed development environment, run it separately:
 

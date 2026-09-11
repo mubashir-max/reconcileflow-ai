@@ -55,6 +55,7 @@ class APISettings(BaseSettings):
     worker_stale_timeout_seconds: int = Field(default=300, ge=30, le=86400)
     worker_retry_delay_seconds: int = Field(default=30, ge=1, le=86400)
     max_manual_job_retries: int = Field(default=3, ge=1, le=20)
+    worker_health_stale_seconds: int = Field(default=120, ge=30, le=86400)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:

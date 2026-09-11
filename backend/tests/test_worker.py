@@ -74,6 +74,11 @@ def test_worker_claims_reports_progress_and_completes_job(worker_database: Datab
     assert loaded.status_message == "Processing reconciliation"
     assert loaded.claimed_by is None
     assert loaded.heartbeat_at is None
+    with worker_database.session() as session:
+        active, stale = PersistenceUnitOfWork(session).workers.health_counts(
+            stale_before=datetime.now(UTC) - timedelta(minutes=1)
+        )
+    assert (active, stale) == (1, 0)
 
 
 def test_worker_failure_is_sanitized_and_scheduled_for_retry(worker_database: Database):
@@ -183,3 +188,8 @@ def test_worker_loop_stops_gracefully_after_current_job(worker_database: Databas
     worker.run_forever(stop_event)
 
     assert stop_event.is_set()
+    with worker_database.session() as session:
+        active, stale = PersistenceUnitOfWork(session).workers.health_counts(
+            stale_before=datetime.now(UTC) - timedelta(minutes=1)
+        )
+    assert (active, stale) == (0, 0)
