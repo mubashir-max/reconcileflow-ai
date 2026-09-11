@@ -50,9 +50,15 @@ def test_invalid_database_scheme_is_rejected():
 
 
 def test_upload_settings_are_validated(tmp_path):
-    settings = APISettings(upload_directory=tmp_path / "uploads", max_upload_size_bytes=2048, _env_file=None)
+    settings = APISettings(
+        storage_provider="LOCAL", upload_directory=tmp_path / "uploads",
+        max_upload_size_bytes=2048, _env_file=None,
+    )
+    assert settings.storage_provider == "local"
     assert settings.upload_directory == tmp_path / "uploads"
     assert settings.max_upload_size_bytes == 2048
+    with pytest.raises(ValidationError, match="storage_provider"):
+        APISettings(storage_provider="unsupported", _env_file=None)
 
 
 def test_token_settings_are_secret_and_validated():

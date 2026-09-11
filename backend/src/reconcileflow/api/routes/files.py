@@ -72,7 +72,7 @@ async def upload_source_file(
                     message="Files can only be uploaded to a pending reconciliation run.",
                 )
             try:
-                stored = await storage.save(file)
+                stored = await storage.save(file, namespace=str(tenant.organization_id))
             except EmptyUploadError as error:
                 raise APIError(status_code=422, code="EMPTY_FILE", message="The uploaded file is empty.") from error
             except UploadTooLargeError as error:

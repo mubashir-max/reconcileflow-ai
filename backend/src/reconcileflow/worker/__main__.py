@@ -8,7 +8,7 @@ import threading
 
 from reconcileflow.api.config import APISettings
 from reconcileflow.persistence import Database
-from reconcileflow.storage import LocalFileStorage
+from reconcileflow.storage import create_file_storage
 
 from .reconciliation import ReconciliationJobProcessor
 from .service import BackgroundWorker
@@ -32,8 +32,10 @@ def main() -> None:
         session_provider=database.session,
         processor=ReconciliationJobProcessor(
             session_provider=database.session,
-            storage=LocalFileStorage(
-                settings.upload_directory, settings.max_upload_size_bytes
+            storage=create_file_storage(
+                settings.storage_provider,
+                directory=settings.upload_directory,
+                max_size_bytes=settings.max_upload_size_bytes,
             ),
         ),
         worker_id=settings.worker_id,

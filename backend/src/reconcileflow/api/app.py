@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from reconcileflow.persistence.database import Database
-from reconcileflow.storage import LocalFileStorage
+from reconcileflow.storage import create_file_storage
 
 from .config import APISettings
 from .errors import register_exception_handlers
@@ -17,7 +17,11 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
     """Build an isolated application instance with validated settings."""
     resolved = settings or APISettings()
     database = Database(resolved)
-    file_storage = LocalFileStorage(resolved.upload_directory, resolved.max_upload_size_bytes)
+    file_storage = create_file_storage(
+        resolved.storage_provider,
+        directory=resolved.upload_directory,
+        max_size_bytes=resolved.max_upload_size_bytes,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

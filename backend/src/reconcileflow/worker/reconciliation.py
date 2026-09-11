@@ -12,7 +12,7 @@ from reconcileflow.ingestion import (
 )
 from reconcileflow.persistence import PersistenceUnitOfWork
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationEngine
-from reconcileflow.storage import LocalFileStorage
+from reconcileflow.storage import FileStorage
 
 from .service import JobCancelled, JobTimedOut, SessionProvider, WorkerContext, WorkerJob
 
@@ -24,7 +24,7 @@ class ReconciliationJobProcessor:
         self,
         *,
         session_provider: SessionProvider,
-        storage: LocalFileStorage,
+        storage: FileStorage,
     ) -> None:
         self._session_provider = session_provider
         self._storage = storage
