@@ -12,7 +12,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, Uuid, func, true
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from reconcileflow.persistence.base import Base
@@ -68,12 +68,16 @@ class OrganizationRecord(Base):
         CheckConstraint("length(trim(name)) > 0", name="nonblank_name"),
         CheckConstraint("length(trim(slug)) > 0", name="nonblank_slug"),
         CheckConstraint("slug = lower(slug) AND slug NOT LIKE '% %'", name="normalized_slug"),
+        CheckConstraint("storage_quota_bytes IS NULL OR storage_quota_bytes >= 0", name="nonnegative_storage_quota"),
+        CheckConstraint("storage_used_bytes >= 0", name="nonnegative_storage_usage"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    storage_quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    storage_used_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

@@ -85,6 +85,29 @@ async def test_authenticated_user_can_discover_and_read_organization_profile(org
 
 
 @pytest.mark.anyio
+async def test_owner_can_manage_storage_quota_and_members_can_read_usage(organization_app):
+    async with AsyncClient(transport=ASGITransport(app=organization_app), base_url="http://test") as client:
+        owner = await _register(client, "quota-owner")
+        organization_id = owner["organization_id"]
+        updated = await client.patch(
+            f"{_path(organization_id)}/storage-quota",
+            headers=_headers(owner),
+            json={"quota_bytes": 2048},
+        )
+        usage = await client.get(f"{_path(organization_id)}/storage-usage", headers=_headers(owner))
+
+    assert updated.status_code == 200
+    assert usage.status_code == 200
+    assert usage.json() == {
+        "organization_id": organization_id,
+        "used_bytes": 0,
+        "quota_bytes": 2048,
+        "remaining_bytes": 2048,
+        "utilization_percent": 0.0,
+    }
+
+
+@pytest.mark.anyio
 async def test_owner_and_admin_can_update_name_without_changing_identity(organization_app):
     async with AsyncClient(transport=ASGITransport(app=organization_app), base_url="http://test") as client:
         owner = await _register(client, "update-owner")

@@ -15,3 +15,7 @@ class PersistenceConflictError(PersistenceError):
 
 class InvalidStatusTransitionError(PersistenceError):
     """Raised when a reconciliation run cannot enter the requested state."""
+
+
+class StorageQuotaExceededError(PersistenceError):
+    """Raised when storing an object would exceed an organization's quota."""
