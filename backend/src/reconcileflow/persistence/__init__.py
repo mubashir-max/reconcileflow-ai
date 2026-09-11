@@ -6,9 +6,11 @@ from .dependencies import DatabaseDependency, SessionDependency, get_database, g
 from .errors import InvalidStatusTransitionError, PersistenceConflictError, PersistenceError, RecordNotFoundError
 from .models import (
     AuditEventRecord,
+    BACKGROUND_JOB_EVENT_TYPES,
     BACKGROUND_JOB_STATUSES,
     BACKGROUND_JOB_PRIORITIES,
     BackgroundJobRecord,
+    BackgroundJobEventRecord,
     BackgroundJobPriority,
     BackgroundJobStatus,
     ConfigurationSnapshotRecord,
@@ -25,6 +27,7 @@ from .models import (
 )
 from .repositories import (
     AuditEventRepository,
+    BackgroundJobEventRepository,
     BackgroundJobRepository,
     ConfigurationSnapshotRepository,
     OrganizationMembershipRepository,
@@ -43,9 +46,12 @@ from .unit_of_work import PersistenceUnitOfWork
 __all__ = [
     "AuditEventRecord",
     "AuditEventRepository",
+    "BACKGROUND_JOB_EVENT_TYPES",
     "BACKGROUND_JOB_STATUSES",
     "BACKGROUND_JOB_PRIORITIES",
     "BackgroundJobRecord",
+    "BackgroundJobEventRecord",
+    "BackgroundJobEventRepository",
     "BackgroundJobPriority",
     "BackgroundJobRepository",
     "BackgroundJobStatus",

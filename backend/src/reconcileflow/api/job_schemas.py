@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import Field
 
@@ -22,6 +23,36 @@ class BackgroundJobPriorityValue(StrEnum):
     LOW = "LOW"
     NORMAL = "NORMAL"
     HIGH = "HIGH"
+
+
+class BackgroundJobEventTypeValue(StrEnum):
+    JOB_QUEUED = "JOB_QUEUED"
+    JOB_CLAIMED = "JOB_CLAIMED"
+    JOB_PROGRESS_UPDATED = "JOB_PROGRESS_UPDATED"
+    JOB_RETRY_SCHEDULED = "JOB_RETRY_SCHEDULED"
+    JOB_MANUAL_RETRY_REQUESTED = "JOB_MANUAL_RETRY_REQUESTED"
+    JOB_CANCELLATION_REQUESTED = "JOB_CANCELLATION_REQUESTED"
+    JOB_CANCELLED = "JOB_CANCELLED"
+    JOB_TIMED_OUT = "JOB_TIMED_OUT"
+    JOB_SUCCEEDED = "JOB_SUCCEEDED"
+    JOB_FAILED = "JOB_FAILED"
+    JOB_RECOVERED = "JOB_RECOVERED"
+
+
+class BackgroundJobEventResponse(StrictModel):
+    id: uuid.UUID
+    job_id: uuid.UUID
+    sequence_number: int = Field(ge=1)
+    event_type: BackgroundJobEventTypeValue
+    occurred_at: datetime
+    details: dict[str, Any]
+
+
+class BackgroundJobEventListResponse(StrictModel):
+    items: list[BackgroundJobEventResponse]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
 
 
 class BackgroundJobResponse(StrictModel):

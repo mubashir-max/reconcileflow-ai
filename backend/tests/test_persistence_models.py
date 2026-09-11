@@ -26,7 +26,7 @@ def test_metadata_defines_complete_schema() -> None:
         "audit_events", "configuration_snapshots", "reconciliation_results",
         "reconciliation_runs", "source_files", "organizations",
         "organization_memberships", "users", "refresh_tokens", "security_audit_events",
-        "background_jobs", "workers",
+        "background_jobs", "background_job_events", "workers",
     }
 
 

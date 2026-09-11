@@ -52,6 +52,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "refresh_tokens",
             "security_audit_events",
             "background_jobs",
+            "background_job_events",
             "workers",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
@@ -166,6 +167,9 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             job_detail = await client.get(
                 f"/api/v1/background-jobs/{executed.json()['job_id']}"
             )
+            job_events = await client.get(
+                f"/api/v1/background-jobs/{executed.json()['job_id']}/events"
+            )
             jobs = await client.get("/api/v1/background-jobs?status=SUCCEEDED")
             with app.state.database.session() as session:
                 with PersistenceUnitOfWork(session) as work:
@@ -261,6 +265,9 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
         assert job_detail.json()["timeout_seconds"] == 120
         assert job_detail.json()["priority"] == "HIGH"
         assert job_detail.json()["deadline_at"] is None
+        assert job_events.status_code == 200
+        assert job_events.json()["items"][0]["event_type"] == "JOB_QUEUED"
+        assert job_events.json()["items"][-1]["event_type"] == "JOB_SUCCEEDED"
         assert jobs.status_code == 200
         assert jobs.json()["total"] >= 1
         assert cancelled_job.status_code == 200

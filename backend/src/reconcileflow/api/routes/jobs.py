@@ -11,7 +11,15 @@ from reconcileflow.persistence.errors import InvalidStatusTransitionError
 
 from ..auth_dependencies import ReconciliationOperatorDependency, TenantContextDependency
 from ..errors import APIError
-from ..job_schemas import BackgroundJobListResponse, BackgroundJobQueueSummary, BackgroundJobResponse, BackgroundJobStatusValue
+from ..job_schemas import (
+    BackgroundJobEventListResponse,
+    BackgroundJobEventResponse,
+    BackgroundJobEventTypeValue,
+    BackgroundJobListResponse,
+    BackgroundJobQueueSummary,
+    BackgroundJobResponse,
+    BackgroundJobStatusValue,
+)
 from ..schemas import ErrorResponse
 
 
@@ -86,6 +94,17 @@ def list_background_jobs(
     )
 
 
+def _event_response(record) -> BackgroundJobEventResponse:
+    return BackgroundJobEventResponse(
+        id=record.id,
+        job_id=record.job_id,
+        sequence_number=record.sequence_number,
+        event_type=record.event_type,
+        occurred_at=_utc(record.occurred_at),
+        details=record.details,
+    )
+
+
 @router.get("/summary", response_model=BackgroundJobQueueSummary, responses=ERROR_RESPONSES)
 def get_background_job_summary(
     session: SessionDependency,
@@ -120,6 +139,39 @@ def get_background_job(
         PersistenceUnitOfWork(session).background_jobs.get(
             job_id, organization_id=tenant.organization_id
         )
+    )
+
+
+@router.get(
+    "/{job_id}/events",
+    response_model=BackgroundJobEventListResponse,
+    responses=ERROR_RESPONSES,
+)
+def list_background_job_events(
+    job_id: uuid.UUID,
+    session: SessionDependency,
+    tenant: TenantContextDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    event_type: Annotated[BackgroundJobEventTypeValue | None, Query()] = None,
+) -> BackgroundJobEventListResponse:
+    work = PersistenceUnitOfWork(session)
+    normalized_type = event_type.value if event_type else None
+    records = work.background_job_events.list(
+        job_id,
+        organization_id=tenant.organization_id,
+        event_type=normalized_type,
+        page=Page(limit=limit, offset=offset),
+    )
+    return BackgroundJobEventListResponse(
+        items=[_event_response(record) for record in records],
+        total=work.background_job_events.count(
+            job_id,
+            organization_id=tenant.organization_id,
+            event_type=normalized_type,
+        ),
+        limit=limit,
+        offset=offset,
     )
 
 

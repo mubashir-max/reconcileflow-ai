@@ -84,6 +84,7 @@ class WorkerContext:
                     organization_id=job.organization_id,
                     progress_percentage=progress_percentage,
                     status_message=status_message,
+                    at=checkpoint_at,
                 )
                 cancellation_requested = (
                     record.status == BackgroundJobStatus.CANCEL_REQUESTED.value
