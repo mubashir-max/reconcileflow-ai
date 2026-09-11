@@ -28,7 +28,7 @@ def test_container_starts_as_non_root_and_applies_migrations():
     assert "alembic upgrade head" in entrypoint
     assert "set -- uvicorn" in entrypoint
     assert 'exec "$@"' in entrypoint
-    assert 'org.opencontainers.image.version="0.4.0"' in dockerfile
+    assert 'org.opencontainers.image.version="0.5.0"' in dockerfile
 
 
 def test_local_docker_secrets_file_is_ignored():

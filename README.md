@@ -1,6 +1,6 @@
 # ReconcileFlow AI
 
-ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.4 adds durable background processing and operational job management to the secure, multi-tenant FastAPI and PostgreSQL platform.
+ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.5 adds private cloud object storage and secure file-lifecycle operations to the multi-tenant FastAPI, PostgreSQL, and background-worker platform.
 
 All repository fixtures are synthetic and anonymized. They contain no real customers, accounts, cards, or payments.
 
@@ -52,6 +52,19 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Ordered, sanitized lifecycle-event history without infrastructure identifiers
 - Docker Compose API, worker, and PostgreSQL development environment
 - Automated SQLite, PostgreSQL, Python 3.12/3.14, and container validation
+
+## v0.5 capabilities
+
+- Provider-independent private object-storage contract
+- Local filesystem and S3-compatible storage providers
+- Private AWS S3, Cloudflare R2, and MinIO configuration
+- Short-lived presigned POST uploads and GET downloads
+- Server-side direct-upload finalization with size, checksum, and format verification
+- Tenant-scoped source-file deletion and abandoned-upload cleanup
+- Organization storage quotas with authoritative usage accounting
+- Read-only storage integrity verification with explicit bounded repair
+- Docker Compose MinIO service with persistent private object storage
+- Sanitized storage failures and operational reports without secrets or object identifiers
 
 ## Architecture
 
@@ -276,7 +289,7 @@ Start the local service with Docker Compose:
 docker compose up --build -d
 ```
 
-Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.4 endpoints are:
+Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.5 endpoints are:
 
 | Method and path | Purpose |
 | --- | --- |
@@ -291,6 +304,8 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `GET /api/v1/auth/me` | Retrieve the authenticated identity and memberships. |
 | `GET /api/v1/organizations` | List organizations available to the user. |
 | `GET/PATCH /api/v1/organizations/{organization_id}` | View or rename an organization. |
+| `GET /api/v1/organizations/{organization_id}/storage-usage` | Retrieve tenant storage usage and remaining quota. |
+| `PATCH /api/v1/organizations/{organization_id}/storage-quota` | Update storage quota as OWNER or ADMIN. |
 | `GET/POST /api/v1/organizations/{organization_id}/members` | List or add members. |
 | `PATCH/DELETE /api/v1/organizations/{organization_id}/members/{membership_id}` | Change a role or deactivate membership. |
 | `GET /api/v1/organizations/{organization_id}/security-audit-events` | List security events as OWNER or ADMIN. |
@@ -300,6 +315,10 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `POST /api/v1/reconciliation-runs/{run_id}/files` | Upload one bank, ERP, or gateway source file. |
 | `GET /api/v1/reconciliation-runs/{run_id}/files` | List uploaded-file metadata for a run. |
 | `GET /api/v1/files/{file_id}` | Retrieve one file's safe metadata. |
+| `DELETE /api/v1/files/{file_id}` | Delete a pending source file and release accounted storage. |
+| `POST /api/v1/reconciliation-runs/{run_id}/files/presigned-upload` | Request a short-lived direct-upload policy. |
+| `POST /api/v1/reconciliation-runs/{run_id}/files/finalize` | Verify and finalize a direct upload. |
+| `POST /api/v1/files/{file_id}/presigned-download` | Request a short-lived private download URL. |
 | `POST /api/v1/reconciliation-runs/{run_id}/execute` | Queue a pending run immediately or at a future UTC time. |
 | `GET /api/v1/background-jobs` | List organization jobs with pagination and status filtering. |
 | `GET /api/v1/background-jobs/summary` | Retrieve safe organization-scoped queue totals and wait age. |
@@ -389,12 +408,11 @@ Security audit events record successful authentication, token rotation and revoc
 
 ## Current limitations
 
-Version 0.4 is a secure multi-tenant background-processing platform, not yet a deployed end-user SaaS product. It does not include:
+Version 0.5 is a secure multi-tenant cloud-storage and background-processing platform, not yet a deployed end-user SaaS product. It does not include:
 
 - Email verification or password-reset email delivery
 - Microsoft, Google, or other external OAuth login
 - CAPTCHA or distributed rate limiting across multiple API instances
-- Cloud object storage
 - Web, Android, or iOS interfaces
 - Human approval and override screens
 - AI-assisted matching, RAG, or LangGraph orchestration
