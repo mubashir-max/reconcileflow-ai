@@ -39,6 +39,7 @@ def _response(record) -> BackgroundJobResponse:
         run_id=record.run_id,
         organization_id=record.organization_id,
         status=record.status,
+        priority=record.priority,
         progress_percentage=record.progress_percentage,
         status_message=record.status_message,
         attempt_count=record.attempt_count,
@@ -103,6 +104,9 @@ def get_background_job_summary(
         cancel_requested=counts["CANCEL_REQUESTED"],
         cancelled=counts["CANCELLED"],
         oldest_eligible_age_seconds=summary["oldest_eligible_age_seconds"],
+        queued_low_priority=summary["priority_counts"]["LOW"],
+        queued_normal_priority=summary["priority_counts"]["NORMAL"],
+        queued_high_priority=summary["priority_counts"]["HIGH"],
     )
 
 

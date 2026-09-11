@@ -145,6 +145,38 @@ async def test_execute_validates_and_exposes_safe_timeout_metadata(execution_app
 
 
 @pytest.mark.anyio
+async def test_execute_accepts_and_exposes_valid_priority(execution_app):
+    async with AsyncClient(
+        transport=ASGITransport(app=execution_app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        run_id = await _create_run(client)
+        await _upload(client, run_id, "BANK_TRANSACTIONS", "bank_transactions.csv")
+        await _upload(client, run_id, "ERP_INVOICES", "erp_invoices.csv")
+        queued = await client.post(
+            f"/api/v1/reconciliation-runs/{run_id}/execute",
+            json={"priority": "HIGH"},
+        )
+        detail = await client.get(
+            f"/api/v1/background-jobs/{queued.json()['job_id']}"
+        )
+
+        invalid_run = await _create_run(client)
+        await _upload(client, invalid_run, "BANK_TRANSACTIONS", "bank_transactions.csv")
+        await _upload(client, invalid_run, "ERP_INVOICES", "erp_invoices.csv")
+        invalid = await client.post(
+            f"/api/v1/reconciliation-runs/{invalid_run}/execute",
+            json={"priority": "URGENT"},
+        )
+
+    assert queued.status_code == 202
+    assert queued.json()["priority"] == "HIGH"
+    assert detail.json()["priority"] == "HIGH"
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "REQUEST_VALIDATION_ERROR"
+
+
+@pytest.mark.anyio
 async def test_execute_requires_bank_and_erp_files(execution_app):
     async with AsyncClient(transport=ASGITransport(app=execution_app, raise_app_exceptions=False), base_url="http://test") as client:
         run_id = await _create_run(client)

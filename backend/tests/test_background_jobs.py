@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from reconcileflow.persistence import (
     BackgroundJobRecord,
+    BackgroundJobPriority,
     BackgroundJobStatus,
     Base,
     InvalidStatusTransitionError,
@@ -44,6 +45,7 @@ def _create_job(
     organization_id: uuid.UUID = ORGANIZATION_ID,
     scheduled_at: datetime | None = None,
     max_attempts: int = 3,
+    priority: BackgroundJobPriority | str = BackgroundJobPriority.NORMAL,
 ) -> BackgroundJobRecord:
     with PersistenceUnitOfWork(session) as work:
         run = work.runs.create(organization_id=organization_id)
@@ -52,6 +54,7 @@ def _create_job(
             run_id=run.id,
             scheduled_at=scheduled_at,
             max_attempts=max_attempts,
+            priority=priority,
         )
 
 
@@ -66,6 +69,7 @@ def test_job_creation_persists_tenant_run_and_queue_defaults(session: Session) -
     assert loaded.progress_percentage == 0
     assert loaded.attempt_count == 0
     assert loaded.max_attempts == 3
+    assert loaded.priority == BackgroundJobPriority.NORMAL
     assert loaded.scheduled_at is not None
 
 
@@ -112,6 +116,55 @@ def test_claim_next_obeys_schedule_and_updates_attempt_state(session: Session) -
     assert PersistenceUnitOfWork(session).background_jobs.get(
         future_job.id, organization_id=ORGANIZATION_ID
     ).status == BackgroundJobStatus.QUEUED
+
+
+def test_priority_claiming_is_deterministic_and_schedules_remain_authoritative(
+    session: Session,
+) -> None:
+    now = datetime.now(UTC)
+    low = _create_job(
+        session, scheduled_at=now - timedelta(seconds=3), priority="LOW"
+    )
+    _create_job(session, scheduled_at=now - timedelta(seconds=2), priority="NORMAL")
+    high = _create_job(
+        session, scheduled_at=now - timedelta(seconds=1), priority="HIGH"
+    )
+    future_high = _create_job(
+        session, scheduled_at=now + timedelta(hours=1), priority="HIGH"
+    )
+
+    with PersistenceUnitOfWork(session) as work:
+        first = work.background_jobs.claim_next(
+            worker_id="priority-worker", at=now, priority_aging_seconds=300
+        )
+    assert first.id == high.id
+
+    with PersistenceUnitOfWork(session) as work:
+        second = work.background_jobs.claim_next(
+            worker_id="priority-worker", at=now, priority_aging_seconds=300
+        )
+    assert second.id != low.id
+    assert future_high.status == BackgroundJobStatus.QUEUED
+
+
+def test_priority_aging_prevents_low_priority_starvation(session: Session) -> None:
+    now = datetime.now(UTC)
+    aged_low = _create_job(
+        session, scheduled_at=now - timedelta(seconds=601), priority="LOW"
+    )
+    _create_job(session, scheduled_at=now - timedelta(seconds=1), priority="HIGH")
+
+    with PersistenceUnitOfWork(session) as work:
+        claimed = work.background_jobs.claim_next(
+            worker_id="aging-worker", at=now, priority_aging_seconds=300
+        )
+
+    assert claimed.id == aged_low.id
+
+
+def test_invalid_job_priority_is_rejected(session: Session) -> None:
+    with pytest.raises(ValueError, match="priority"):
+        _create_job(session, priority="URGENT")
 
 
 def test_progress_success_and_cancellation_lifecycle(session: Session) -> None:

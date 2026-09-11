@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import Field, field_validator
 
 from .run_schemas import ReconciliationRunStatus, StrictModel
+from .job_schemas import BackgroundJobPriorityValue
 
 
 class ReconciliationResultStatus(StrEnum):
@@ -35,11 +36,13 @@ class ExecutionAcceptedResponse(StrictModel):
     status: Literal["QUEUED"]
     scheduled_at: datetime
     timeout_seconds: int = Field(ge=30)
+    priority: BackgroundJobPriorityValue
 
 
 class ExecutionRequest(StrictModel):
     scheduled_at: datetime | None = None
     timeout_seconds: int | None = Field(default=None, ge=30)
+    priority: BackgroundJobPriorityValue = BackgroundJobPriorityValue.NORMAL
 
     @field_validator("scheduled_at")
     @classmethod

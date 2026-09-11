@@ -40,6 +40,7 @@ def main() -> None:
         poll_interval_seconds=settings.worker_poll_interval_seconds,
         stale_timeout_seconds=settings.worker_stale_timeout_seconds,
         retry_delay_seconds=settings.worker_retry_delay_seconds,
+        priority_aging_seconds=settings.job_priority_aging_seconds,
     )
     try:
         worker.run_forever(stop_event)

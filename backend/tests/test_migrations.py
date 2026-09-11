@@ -232,6 +232,41 @@ def test_retention_schema_can_add_and_remove_job_deadlines(tmp_path: Path) -> No
     assert not {"timeout_seconds", "deadline_at"} & columns
     engine.dispose()
 
+
+def test_job_deadlines_can_add_and_remove_priorities(tmp_path: Path) -> None:
+    database_path = tmp_path / "job-priorities-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+    command.upgrade(config, "b7e3f9a21c64")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+    assert "priority" in {
+        column["name"] for column in inspector.get_columns("background_jobs")
+    }
+    queue_index = next(
+        index for index in inspector.get_indexes("background_jobs")
+        if index["name"] == "ix_background_jobs_queue"
+    )
+    assert queue_index["column_names"] == [
+        "status", "priority", "scheduled_at", "retry_at", "created_at"
+    ]
+    engine.dispose()
+    command.downgrade(config, "b7e3f9a21c64")
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+    assert "priority" not in {
+        column["name"] for column in inspector.get_columns("background_jobs")
+    }
+    queue_index = next(
+        index for index in inspector.get_indexes("background_jobs")
+        if index["name"] == "ix_background_jobs_queue"
+    )
+    assert queue_index["column_names"] == [
+        "status", "scheduled_at", "retry_at", "created_at"
+    ]
+    engine.dispose()
+
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:
     database_path = tmp_path / "tenant-upgrade.db"
     database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
