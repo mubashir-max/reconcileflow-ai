@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from reconcileflow.persistence import Page, PersistenceUnitOfWork, SessionDependency
 
@@ -42,6 +42,7 @@ def _audit(record) -> AuditEventResponse:
 )
 def execute_run(
     run_id: uuid.UUID,
+    api_request: Request,
     session: SessionDependency,
     tenant: ReconciliationOperatorDependency,
     request: ExecutionRequest | None = None,
@@ -59,6 +60,17 @@ def execute_run(
             status_code=422,
             code="SCHEDULE_TOO_DISTANT",
             message="The execution schedule must be within 365 days.",
+        )
+    timeout_seconds = (
+        request.timeout_seconds
+        if request and request.timeout_seconds is not None
+        else api_request.app.state.settings.default_job_timeout_seconds
+    )
+    if timeout_seconds > api_request.app.state.settings.maximum_job_timeout_seconds:
+        raise APIError(
+            status_code=422,
+            code="JOB_TIMEOUT_TOO_LARGE",
+            message="The execution timeout exceeds the permitted maximum.",
         )
     with PersistenceUnitOfWork(session) as work:
         run = work.runs.get(run_id, organization_id=tenant.organization_id, lock=True)
@@ -81,12 +93,14 @@ def execute_run(
             organization_id=tenant.organization_id,
             run_id=run_id,
             scheduled_at=scheduled_at,
+            timeout_seconds=timeout_seconds,
         )
     return ExecutionAcceptedResponse(
         job_id=job.id,
         run_id=run_id,
         status="QUEUED",
         scheduled_at=job.scheduled_at,
+        timeout_seconds=job.timeout_seconds,
     )
 
 

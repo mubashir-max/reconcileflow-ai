@@ -61,6 +61,8 @@ class APISettings(BaseSettings):
     cancelled_job_retention_days: int = Field(default=30, ge=1, le=3650)
     worker_record_retention_days: int = Field(default=7, ge=1, le=3650)
     cleanup_batch_size: int = Field(default=500, ge=1, le=10000)
+    default_job_timeout_seconds: int = Field(default=900, ge=30, le=86400)
+    maximum_job_timeout_seconds: int = Field(default=3600, ge=30, le=86400)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:
@@ -69,6 +71,8 @@ class APISettings(BaseSettings):
             raise ValueError("token_signing_secret must contain at least 32 characters")
         if self.environment is Environment.PRODUCTION and secret == "development-only-change-this-token-secret":
             raise ValueError("production requires a non-default token_signing_secret")
+        if self.default_job_timeout_seconds > self.maximum_job_timeout_seconds:
+            raise ValueError("default_job_timeout_seconds must not exceed maximum_job_timeout_seconds")
         return self
 
     @field_validator("database_url")

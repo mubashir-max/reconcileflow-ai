@@ -215,6 +215,23 @@ def test_worker_lifecycle_can_add_and_remove_retention_indexes(tmp_path: Path) -
     }
     engine.dispose()
 
+
+def test_retention_schema_can_add_and_remove_job_deadlines(tmp_path: Path) -> None:
+    database_path = tmp_path / "job-deadlines-upgrade.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config = _config(database_url)
+    command.upgrade(config, "c9d2e6f41a83")
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("background_jobs")}
+    assert {"timeout_seconds", "deadline_at"} <= columns
+    engine.dispose()
+    command.downgrade(config, "c9d2e6f41a83")
+    engine = create_engine(database_url)
+    columns = {column["name"] for column in inspect(engine).get_columns("background_jobs")}
+    assert not {"timeout_seconds", "deadline_at"} & columns
+    engine.dispose()
+
 def test_existing_runs_are_assigned_to_legacy_organization(tmp_path: Path) -> None:
     database_path = tmp_path / "tenant-upgrade.db"
     database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"

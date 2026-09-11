@@ -94,6 +94,7 @@ async def test_execute_persists_results_and_ordered_audit_history(execution_app)
     assert executed.json()["run_id"] == run_id
     assert executed.json()["status"] == "QUEUED"
     assert executed.json()["job_id"]
+    assert executed.json()["timeout_seconds"] == 900
     assert queued_run.json()["status"] == "PENDING"
     assert empty_results.json()["total"] == 0
     assert run.json()["status"] == "SUCCEEDED"
@@ -109,6 +110,38 @@ async def test_execute_persists_results_and_ordered_audit_history(execution_app)
         assert job.status == "SUCCEEDED"
         assert job.progress_percentage == 100
         assert job.failure_message is None
+        assert job.deadline_at is None
+
+
+@pytest.mark.anyio
+async def test_execute_validates_and_exposes_safe_timeout_metadata(execution_app):
+    async with AsyncClient(
+        transport=ASGITransport(app=execution_app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        run_id = await _create_run(client)
+        await _upload(client, run_id, "BANK_TRANSACTIONS", "bank_transactions.csv")
+        await _upload(client, run_id, "ERP_INVOICES", "erp_invoices.csv")
+        queued = await client.post(
+            f"/api/v1/reconciliation-runs/{run_id}/execute",
+            json={"timeout_seconds": 120},
+        )
+        job = await client.get(f"/api/v1/background-jobs/{queued.json()['job_id']}")
+
+        other_run = await _create_run(client)
+        await _upload(client, other_run, "BANK_TRANSACTIONS", "bank_transactions.csv")
+        await _upload(client, other_run, "ERP_INVOICES", "erp_invoices.csv")
+        rejected = await client.post(
+            f"/api/v1/reconciliation-runs/{other_run}/execute",
+            json={"timeout_seconds": 3601},
+        )
+
+    assert queued.status_code == 202
+    assert queued.json()["timeout_seconds"] == 120
+    assert job.json()["timeout_seconds"] == 120
+    assert job.json()["deadline_at"] is None
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "JOB_TIMEOUT_TOO_LARGE"
 
 
 @pytest.mark.anyio

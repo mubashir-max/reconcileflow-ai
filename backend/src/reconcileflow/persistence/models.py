@@ -190,6 +190,7 @@ class BackgroundJobRecord(Base):
         CheckConstraint("total_attempt_count >= 0", name="nonnegative_total_attempt_count"),
         CheckConstraint("manual_retry_count >= 0", name="nonnegative_manual_retry_count"),
         CheckConstraint("max_attempts >= 1", name="positive_max_attempts"),
+        CheckConstraint("timeout_seconds >= 30", name="valid_timeout_seconds"),
         CheckConstraint("attempt_count <= max_attempts", name="attempts_within_limit"),
         CheckConstraint(
             "completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at",
@@ -215,6 +216,8 @@ class BackgroundJobRecord(Base):
     total_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     manual_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=900, server_default="900")
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_manual_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -14,7 +14,7 @@ from reconcileflow.persistence import PersistenceUnitOfWork
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationEngine
 from reconcileflow.storage import LocalFileStorage
 
-from .service import JobCancelled, SessionProvider, WorkerContext, WorkerJob
+from .service import JobCancelled, JobTimedOut, SessionProvider, WorkerContext, WorkerJob
 
 
 class ReconciliationJobProcessor:
@@ -101,6 +101,8 @@ class ReconciliationJobProcessor:
             context.checkpoint(job, progress_percentage=95, status_message="Saving results")
             trail.succeed()
 
+            context.checkpoint(job, progress_percentage=99, status_message="Finalizing results")
+
             with self._session_provider() as session:
                 with PersistenceUnitOfWork(session) as work:
                     current = work.runs.get(
@@ -118,6 +120,10 @@ class ReconciliationJobProcessor:
                     )
         except JobCancelled as error:
             self._fail_run(job, trail, error, code="EXECUTION_CANCELLED")
+            raise
+        except JobTimedOut as error:
+            if job.attempt_count >= job.max_attempts:
+                self._fail_run(job, trail, error, code="EXECUTION_TIMEOUT")
             raise
         except Exception as error:
             if job.attempt_count >= job.max_attempts:
@@ -144,11 +150,10 @@ class ReconciliationJobProcessor:
                 for event in trail.events:
                     if event.event is not AuditEventType.RUN_SUCCEEDED:
                         work.audit_events.append(event)
-                message = (
-                    "Reconciliation execution was cancelled."
-                    if code == "EXECUTION_CANCELLED"
-                    else "Reconciliation execution failed."
-                )
+                message = {
+                    "EXECUTION_CANCELLED": "Reconciliation execution was cancelled.",
+                    "EXECUTION_TIMEOUT": "Reconciliation execution exceeded its timeout.",
+                }.get(code, "Reconciliation execution failed.")
                 work.runs.transition(
                     job.run_id,
                     "FAILED",

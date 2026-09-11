@@ -81,6 +81,8 @@ def test_worker_settings_are_validated():
         worker_retry_delay_seconds=5,
         max_manual_job_retries=4,
         worker_health_stale_seconds=90,
+        default_job_timeout_seconds=120,
+        maximum_job_timeout_seconds=600,
         _env_file=None,
     )
     assert settings.worker_id == "worker-a"
@@ -89,6 +91,8 @@ def test_worker_settings_are_validated():
     assert settings.worker_retry_delay_seconds == 5
     assert settings.max_manual_job_retries == 4
     assert settings.worker_health_stale_seconds == 90
+    assert settings.default_job_timeout_seconds == 120
+    assert settings.maximum_job_timeout_seconds == 600
     with pytest.raises(ValidationError):
         APISettings(worker_id=" ", _env_file=None)
     with pytest.raises(ValidationError):
@@ -97,6 +101,12 @@ def test_worker_settings_are_validated():
         APISettings(max_manual_job_retries=0, _env_file=None)
     with pytest.raises(ValidationError):
         APISettings(worker_health_stale_seconds=10, _env_file=None)
+    with pytest.raises(ValidationError):
+        APISettings(
+            default_job_timeout_seconds=601,
+            maximum_job_timeout_seconds=600,
+            _env_file=None,
+        )
 
 
 def test_short_token_secret_is_rejected():
