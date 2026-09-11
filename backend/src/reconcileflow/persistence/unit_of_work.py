@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .errors import PersistenceConflictError
 from .repositories import (
     AuditEventRepository,
+    AIMatchSuggestionRepository,
     BackgroundJobEventRepository,
     BackgroundJobRepository,
     ConfigurationSnapshotRepository,
@@ -35,6 +36,7 @@ class PersistenceUnitOfWork:
         self.configurations = ConfigurationSnapshotRepository(session)
         self.results = ReconciliationResultRepository(session)
         self.audit_events = AuditEventRepository(session)
+        self.ai_match_suggestions = AIMatchSuggestionRepository(session)
         self.background_jobs = BackgroundJobRepository(session)
         self.background_job_events = BackgroundJobEventRepository(session)
         self.organizations = OrganizationRepository(session)

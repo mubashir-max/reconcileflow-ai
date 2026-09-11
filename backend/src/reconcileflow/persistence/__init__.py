@@ -6,6 +6,8 @@ from .dependencies import DatabaseDependency, SessionDependency, get_database, g
 from .errors import InvalidStatusTransitionError, PersistenceConflictError, PersistenceError, RecordNotFoundError, StorageQuotaExceededError
 from .models import (
     AuditEventRecord,
+    AIMatchSuggestionRecord,
+    AI_SUGGESTION_STATUSES,
     BACKGROUND_JOB_EVENT_TYPES,
     BACKGROUND_JOB_STATUSES,
     BACKGROUND_JOB_PRIORITIES,
@@ -27,6 +29,7 @@ from .models import (
 )
 from .repositories import (
     AuditEventRepository,
+    AIMatchSuggestionRepository,
     BackgroundJobEventRepository,
     BackgroundJobRepository,
     ConfigurationSnapshotRepository,
@@ -46,6 +49,9 @@ from .unit_of_work import PersistenceUnitOfWork
 __all__ = [
     "AuditEventRecord",
     "AuditEventRepository",
+    "AIMatchSuggestionRecord",
+    "AIMatchSuggestionRepository",
+    "AI_SUGGESTION_STATUSES",
     "BACKGROUND_JOB_EVENT_TYPES",
     "BACKGROUND_JOB_STATUSES",
     "BACKGROUND_JOB_PRIORITIES",

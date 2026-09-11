@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -12,11 +14,13 @@ from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from reconcileflow.audit import AuditEvent
+from reconcileflow.ai import CandidateRecordSet, MatchSuggestionStatus
 from reconcileflow.reconciliation import ReconciliationConfig, ReconciliationResult
 
 from .errors import InvalidStatusTransitionError, PersistenceConflictError, RecordNotFoundError, StorageQuotaExceededError
 from .models import (
     AuditEventRecord,
+    AIMatchSuggestionRecord,
     BACKGROUND_JOB_STATUSES,
     BACKGROUND_JOB_PRIORITIES,
     BACKGROUND_JOB_EVENT_TYPES,
@@ -1282,6 +1286,154 @@ class ConfigurationSnapshotRepository:
         if record is None:
             raise RecordNotFoundError(f"configuration for run {run_id} was not found")
         return record
+
+
+class AIMatchSuggestionRepository:
+    """Tenant-scoped persistence for advisory suggestions only."""
+
+    _FORBIDDEN_METADATA_TERMS = {
+        "authorization", "credential", "endpoint", "key", "path", "prompt",
+        "raw", "response", "secret", "token", "url",
+    }
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(
+        self, *, organization_id: uuid.UUID, run_id: uuid.UUID,
+        candidates: CandidateRecordSet, confidence_score: Decimal,
+        explanation: dict[str, Any], features: dict[str, Any], provider: str,
+        model_version: str, prompt_template_version: str,
+        inference_config_version: str, expires_at: datetime | None = None,
+    ) -> AIMatchSuggestionRecord:
+        run_exists = self._session.scalar(
+            select(ReconciliationRunRecord.id).where(
+                ReconciliationRunRecord.id == run_id,
+                ReconciliationRunRecord.organization_id == organization_id,
+            )
+        )
+        if run_exists is None:
+            raise RecordNotFoundError(f"reconciliation run {run_id} was not found")
+        confidence = Decimal(confidence_score)
+        if confidence < 0 or confidence > 1:
+            raise ValueError("confidence_score must be between 0 and 1")
+        self._validate_metadata(explanation, field="explanation")
+        self._validate_metadata(features, field="features")
+        provider = self._required_text(provider, "provider", 100)
+        model_version = self._required_text(model_version, "model_version", 150)
+        prompt_template_version = self._required_text(prompt_template_version, "prompt_template_version", 100)
+        inference_config_version = self._required_text(inference_config_version, "inference_config_version", 100)
+        if expires_at is not None:
+            expires_at = _utc(expires_at)
+        fingerprint_payload = {
+            "bank": sorted(candidates.bank_record_ids),
+            "erp": sorted(candidates.erp_invoice_ids),
+            "gateway": sorted(candidates.gateway_record_ids),
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(fingerprint_payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        record = AIMatchSuggestionRecord(
+            organization_id=organization_id, run_id=run_id,
+            confidence_score=confidence, candidate_fingerprint=fingerprint,
+            bank_record_ids=list(candidates.bank_record_ids),
+            erp_invoice_ids=list(candidates.erp_invoice_ids),
+            gateway_record_ids=list(candidates.gateway_record_ids),
+            explanation=explanation, features=features, provider=provider,
+            model_version=model_version,
+            prompt_template_version=prompt_template_version,
+            inference_config_version=inference_config_version,
+            expires_at=expires_at,
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get(self, suggestion_id: uuid.UUID, *, organization_id: uuid.UUID, lock: bool = False) -> AIMatchSuggestionRecord:
+        statement = select(AIMatchSuggestionRecord).where(
+            AIMatchSuggestionRecord.id == suggestion_id,
+            AIMatchSuggestionRecord.organization_id == organization_id,
+        )
+        if lock:
+            statement = statement.with_for_update()
+        record = self._session.scalar(statement)
+        if record is None:
+            raise RecordNotFoundError(f"AI match suggestion {suggestion_id} was not found")
+        return record
+
+    def list_for_run(
+        self, run_id: uuid.UUID, *, organization_id: uuid.UUID,
+        page: Page = Page(), status: MatchSuggestionStatus | str | None = None,
+    ) -> list[AIMatchSuggestionRecord]:
+        statement = select(AIMatchSuggestionRecord).where(
+            AIMatchSuggestionRecord.run_id == run_id,
+            AIMatchSuggestionRecord.organization_id == organization_id,
+        )
+        if status is not None:
+            status_value = MatchSuggestionStatus(status).value
+            statement = statement.where(AIMatchSuggestionRecord.status == status_value)
+        return list(self._session.scalars(
+            statement.order_by(AIMatchSuggestionRecord.created_at, AIMatchSuggestionRecord.id)
+            .limit(page.limit).offset(page.offset)
+        ))
+
+    def resolve(
+        self, suggestion_id: uuid.UUID, *, organization_id: uuid.UUID,
+        reviewer_user_id: uuid.UUID, decision: MatchSuggestionStatus | str,
+        reviewed_at: datetime,
+    ) -> AIMatchSuggestionRecord:
+        decision_value = MatchSuggestionStatus(decision)
+        if decision_value not in {MatchSuggestionStatus.ACCEPTED, MatchSuggestionStatus.REJECTED}:
+            raise ValueError("decision must be ACCEPTED or REJECTED")
+        record = self.get(suggestion_id, organization_id=organization_id, lock=True)
+        if record.status != MatchSuggestionStatus.PENDING.value:
+            raise PersistenceConflictError("AI match suggestion is no longer pending")
+        if self._session.get(UserRecord, reviewer_user_id) is None:
+            raise RecordNotFoundError(f"user {reviewer_user_id} was not found")
+        record.status = decision_value.value
+        record.reviewed_by_user_id = reviewer_user_id
+        record.reviewed_at = _utc(reviewed_at)
+        self._session.flush()
+        return record
+
+    def expire(self, suggestion_id: uuid.UUID, *, organization_id: uuid.UUID) -> AIMatchSuggestionRecord:
+        record = self.get(suggestion_id, organization_id=organization_id, lock=True)
+        if record.status != MatchSuggestionStatus.PENDING.value:
+            raise PersistenceConflictError("AI match suggestion is no longer pending")
+        record.status = MatchSuggestionStatus.EXPIRED.value
+        self._session.flush()
+        return record
+
+    @classmethod
+    def _validate_metadata(cls, value: dict[str, Any], *, field: str) -> None:
+        if not isinstance(value, dict) or not value:
+            raise ValueError(f"{field} must be a non-empty structured object")
+
+        def inspect(item: Any) -> None:
+            if isinstance(item, dict):
+                for key, nested in item.items():
+                    normalized = str(key).lower().replace("-", "_")
+                    if any(term in normalized for term in cls._FORBIDDEN_METADATA_TERMS):
+                        raise ValueError(f"{field} contains a forbidden field")
+                    inspect(nested)
+            elif isinstance(item, list):
+                if len(item) > 100:
+                    raise ValueError(f"{field} contains too many values")
+                for nested in item:
+                    inspect(nested)
+            elif isinstance(item, str) and len(item) > 500:
+                raise ValueError(f"{field} text values must not exceed 500 characters")
+            elif item is not None and not isinstance(item, (str, int, float, bool)):
+                raise ValueError(f"{field} contains a non-JSON value")
+
+        inspect(value)
+
+    @staticmethod
+    def _required_text(value: str, field: str, maximum: int) -> str:
+        normalized = value.strip()
+        if not normalized or len(normalized) > maximum:
+            raise ValueError(f"{field} must be nonblank and at most {maximum} characters")
+        return normalized
 
 
 class ReconciliationResultRepository:
