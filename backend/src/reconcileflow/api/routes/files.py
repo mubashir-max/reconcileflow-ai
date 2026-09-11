@@ -5,14 +5,29 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 
 from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency
-from reconcileflow.storage import EmptyUploadError, UnsupportedUploadError, UploadTooLargeError
+from reconcileflow.storage import (
+    EmptyUploadError,
+    InvalidStorageKeyError,
+    PresigningNotSupportedError,
+    StorageNotFoundError,
+    StorageOperationError,
+    UnsupportedUploadError,
+    UploadTooLargeError,
+)
 
 from ..errors import APIError
 from ..auth_dependencies import ReconciliationOperatorDependency, TenantContextDependency, get_tenant_context
-from ..file_schemas import SourceFileListResponse, SourceFileMetadataResponse, SourceFileType
+from ..file_schemas import (
+    PresignedDownloadResponse,
+    PresignedUploadRequest,
+    PresignedUploadResponse,
+    SourceFileListResponse,
+    SourceFileMetadataResponse,
+    SourceFileType,
+)
 from ..schemas import ErrorResponse
 from ..storage_dependencies import FileStorageDependency
 
@@ -116,3 +131,79 @@ def list_source_files(run_id: uuid.UUID, session: SessionDependency, tenant: Ten
 )
 def get_source_file(file_id: uuid.UUID, session: SessionDependency, tenant: TenantContextDependency) -> SourceFileMetadataResponse:
     return _response(PersistenceUnitOfWork(session).source_files.get(file_id, organization_id=tenant.organization_id))
+
+
+def _presigning_error(error: Exception) -> APIError:
+    if isinstance(error, PresigningNotSupportedError):
+        return APIError(status_code=409, code="DIRECT_STORAGE_UNAVAILABLE", message="Direct object access is unavailable for the configured storage provider.")
+    if isinstance(error, (InvalidStorageKeyError, UnsupportedUploadError)):
+        return APIError(status_code=422, code="INVALID_FILE", message="The requested file type is unsupported.")
+    if isinstance(error, StorageNotFoundError):
+        return APIError(status_code=404, code="FILE_NOT_FOUND", message="The requested file does not exist.")
+    return APIError(status_code=503, code="STORAGE_UNAVAILABLE", message="Object storage is temporarily unavailable.")
+
+
+@router.post(
+    "/reconciliation-runs/{run_id}/files/presigned-upload",
+    response_model=PresignedUploadResponse,
+    summary="Create a direct private-storage upload request",
+    description="Requires OWNER, ADMIN, or ANALYST. The URL is short-lived and tenant-scoped.",
+    responses={409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def create_presigned_upload(
+    run_id: uuid.UUID,
+    payload: PresignedUploadRequest,
+    request: Request,
+    session: SessionDependency,
+    storage: FileStorageDependency,
+    tenant: ReconciliationOperatorDependency,
+) -> PresignedUploadResponse:
+    ttl = request.app.state.settings.presigned_url_ttl_seconds
+    try:
+        with PersistenceUnitOfWork(session) as work:
+            run = work.runs.get(run_id, organization_id=tenant.organization_id)
+            if run.status != "PENDING":
+                raise APIError(status_code=409, code="RUN_NOT_PENDING", message="Files can only be uploaded to a pending reconciliation run.")
+            key, url, fields = storage.create_upload_url(
+                namespace=str(tenant.organization_id), filename=payload.filename,
+                content_type=payload.content_type, expires_seconds=ttl,
+            )
+            work.security_audit_events.append(
+                organization_id=tenant.organization_id, actor_user_id=tenant.user_id,
+                event_type="PRESIGNED_UPLOAD_ISSUED",
+                details={"run_id": str(run_id), "storage_key": key, "expires_in_seconds": ttl},
+            )
+        return PresignedUploadResponse(storage_key=key, url=url, fields=fields, expires_in_seconds=ttl)
+    except APIError:
+        raise
+    except (PresigningNotSupportedError, InvalidStorageKeyError, UnsupportedUploadError, StorageOperationError) as error:
+        raise _presigning_error(error) from error
+
+
+@router.post(
+    "/files/{file_id}/presigned-download",
+    response_model=PresignedDownloadResponse,
+    summary="Create a direct private-storage download URL",
+    description="Requires an active membership in the file's organization. The URL is short-lived.",
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def create_presigned_download(
+    file_id: uuid.UUID,
+    request: Request,
+    session: SessionDependency,
+    storage: FileStorageDependency,
+    tenant: TenantContextDependency,
+) -> PresignedDownloadResponse:
+    ttl = request.app.state.settings.presigned_url_ttl_seconds
+    try:
+        with PersistenceUnitOfWork(session) as work:
+            record = work.source_files.get(file_id, organization_id=tenant.organization_id)
+            url = storage.create_download_url(record.storage_key, expires_seconds=ttl)
+            work.security_audit_events.append(
+                organization_id=tenant.organization_id, actor_user_id=tenant.user_id,
+                event_type="PRESIGNED_DOWNLOAD_ISSUED",
+                details={"file_id": str(file_id), "expires_in_seconds": ttl},
+            )
+        return PresignedDownloadResponse(url=url, expires_in_seconds=ttl)
+    except (PresigningNotSupportedError, StorageNotFoundError, StorageOperationError) as error:
+        raise _presigning_error(error) from error

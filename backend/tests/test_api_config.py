@@ -76,6 +76,9 @@ def test_s3_settings_are_secret_and_restrict_insecure_remote_endpoints():
     assert settings.s3_access_key_id.get_secret_value() == "local-user"
     assert settings.s3_secret_access_key.get_secret_value() == "local-secret"
     assert "local-secret" not in repr(settings)
+    assert settings.presigned_url_ttl_seconds == 300
+    with pytest.raises(ValidationError):
+        APISettings(presigned_url_ttl_seconds=30, _env_file=None)
     with pytest.raises(ValidationError, match="configured together"):
         APISettings(s3_access_key_id="only-one", _env_file=None)
     with pytest.raises(ValidationError, match="plain HTTP"):

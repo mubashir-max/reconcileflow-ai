@@ -5,6 +5,7 @@ from pathlib import Path
 from .base import (
     FileStorage,
     InvalidStorageKeyError,
+    PresigningNotSupportedError,
     StorageError,
     StorageNotFoundError,
     StorageObjectMetadata,
@@ -54,6 +55,7 @@ __all__ = [
     "FileStorage",
     "InvalidStorageKeyError",
     "LocalFileStorage",
+    "PresigningNotSupportedError",
     "S3FileStorage",
     "StorageError",
     "StorageNotFoundError",

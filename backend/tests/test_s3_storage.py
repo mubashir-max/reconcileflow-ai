@@ -39,6 +39,14 @@ class FakeS3Client:
     def head_bucket(self, *, Bucket):
         return {}
 
+    def generate_presigned_post(self, **kwargs):
+        self.presigned_post_args = kwargs
+        return {"url": "https://objects.example.test/private-test-bucket", "fields": {"key": kwargs["Key"], "x-amz-signature": "signature"}}
+
+    def generate_presigned_url(self, operation, **kwargs):
+        self.presigned_url_args = (operation, kwargs)
+        return "https://objects.example.test/download?X-Amz-Signature=signature"
+
 
 def _missing(operation: str) -> ClientError:
     return ClientError({"Error": {"Code": "404", "Message": "sensitive provider detail"}}, operation)
@@ -105,3 +113,29 @@ def test_s3_provider_rejects_keys_and_sanitizes_provider_errors(monkeypatch):
     with pytest.raises(StorageOperationError) as failed:
         storage.exists("a" * 32 + ".csv")
     assert "test-secret" not in str(failed.value)
+
+
+def test_s3_provider_issues_bounded_private_presigned_requests(monkeypatch):
+    client = FakeS3Client()
+    storage = _storage(monkeypatch, client)
+    key, url, fields = storage.create_upload_url(
+        namespace="tenant-id", filename="transactions.csv",
+        content_type="text/csv", expires_seconds=300,
+    )
+    assert url.startswith("https://")
+    assert fields["key"] == key
+    assert client.presigned_post_args["ExpiresIn"] == 300
+    assert ["content-length-range", 1, 1024] in client.presigned_post_args["Conditions"]
+    assert "ACL" not in client.presigned_post_args["Fields"]
+
+    client.objects[key] = b"id,amount\n1,10\n"
+    download = storage.create_download_url(key, expires_seconds=120)
+    assert download.startswith("https://")
+    assert client.presigned_url_args[0] == "get_object"
+    assert client.presigned_url_args[1]["ExpiresIn"] == 120
+
+    with pytest.raises(InvalidStorageKeyError):
+        storage.create_upload_url(
+            namespace="tenant-id", filename="transactions.csv",
+            content_type="application/octet-stream", expires_seconds=300,
+        )

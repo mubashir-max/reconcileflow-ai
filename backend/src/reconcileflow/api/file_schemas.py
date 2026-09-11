@@ -34,3 +34,20 @@ class SourceFileMetadataResponse(StrictModel):
 class SourceFileListResponse(StrictModel):
     items: list[SourceFileMetadataResponse]
     total: int = Field(ge=0)
+
+
+class PresignedUploadRequest(StrictModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=1, max_length=200)
+
+
+class PresignedUploadResponse(StrictModel):
+    storage_key: str
+    url: str
+    fields: dict[str, str]
+    expires_in_seconds: int
+
+
+class PresignedDownloadResponse(StrictModel):
+    url: str
+    expires_in_seconds: int

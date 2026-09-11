@@ -19,6 +19,7 @@ from .base import (
     StorageOperationError,
     StoredUpload,
     UploadStream,
+    PresigningNotSupportedError,
 )
 
 
@@ -120,6 +121,14 @@ class LocalFileStorage:
     @contextmanager
     def materialize(self, storage_key: str) -> Iterator[Path]:
         yield self.resolve(storage_key)
+
+    def create_upload_url(
+        self, *, namespace: str, filename: str, content_type: str, expires_seconds: int
+    ) -> tuple[str, str, dict[str, str]]:
+        raise PresigningNotSupportedError("direct object access is unavailable")
+
+    def create_download_url(self, storage_key: str, *, expires_seconds: int) -> str:
+        raise PresigningNotSupportedError("direct object access is unavailable")
 
     def resolve(self, storage_key: str, *, require_exists: bool = True) -> Path:
         """Resolve a server-generated key without allowing traversal."""
