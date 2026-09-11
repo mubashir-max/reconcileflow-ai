@@ -1237,6 +1237,32 @@ class SourceFileRepository:
             )
         )
 
+    def list_stored_for_organization(
+        self, *, organization_id: uuid.UUID, limit: int
+    ) -> list[SourceFileRecord]:
+        return list(
+            self._session.scalars(
+                select(SourceFileRecord)
+                .join(ReconciliationRunRecord)
+                .where(
+                    ReconciliationRunRecord.organization_id == organization_id,
+                    SourceFileRecord.storage_key.is_not(None),
+                )
+                .order_by(SourceFileRecord.created_at, SourceFileRecord.id)
+                .limit(limit)
+            )
+        )
+
+    def total_size_for_organization(self, *, organization_id: uuid.UUID) -> int:
+        return int(
+            self._session.scalar(
+                select(func.coalesce(func.sum(SourceFileRecord.size_bytes), 0))
+                .join(ReconciliationRunRecord)
+                .where(ReconciliationRunRecord.organization_id == organization_id)
+            )
+            or 0
+        )
+
 
 class ConfigurationSnapshotRepository:
     def __init__(self, session: Session) -> None:

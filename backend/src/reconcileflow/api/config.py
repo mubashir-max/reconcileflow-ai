@@ -56,6 +56,8 @@ class APISettings(BaseSettings):
     s3_auto_create_bucket: bool = False
     presigned_url_ttl_seconds: int = Field(default=300, ge=60, le=900)
     abandoned_upload_retention_hours: int = Field(default=24, ge=1, le=720)
+    storage_integrity_grace_hours: int = Field(default=24, ge=1, le=720)
+    storage_integrity_batch_size: int = Field(default=500, ge=1, le=10000)
     max_upload_size_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
     default_organization_storage_quota_bytes: int = Field(default=10 * 1024 * 1024 * 1024, ge=0)
     token_signing_secret: SecretStr = SecretStr("development-only-change-this-token-secret")
