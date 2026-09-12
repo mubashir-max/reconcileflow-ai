@@ -1,6 +1,7 @@
 """Provider-independent foundations for advisory AI-assisted matching."""
 
 from .models import CandidateRecordSet, MatchSuggestionStatus
+from .openai_compatible import OpenAICompatibleInferenceProvider
 from .candidates import (
     CandidateSourceRecord,
     CandidateSourceType,
@@ -28,4 +29,5 @@ __all__ = [
     "CandidateSourceRecord", "CandidateSourceType", "GeneratedCandidate",
     "DisabledAIInferenceProvider", "MatchSuggestionStatus", "NormalizedMatchFeatures",
     "ReconciliationCandidateGenerator", "create_ai_inference_provider",
+    "OpenAICompatibleInferenceProvider",
 ]

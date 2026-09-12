@@ -185,6 +185,36 @@ def test_ai_inference_settings_are_safe_and_validated():
         )
 
 
+def test_hosted_ai_settings_protect_credentials_and_require_https():
+    settings = APISettings(
+        environment="test",
+        ai_inference_provider="openai-compatible",
+        ai_endpoint_url="https://api.example.com/v1/responses",
+        ai_api_key="test-secret-value",
+        _env_file=None,
+    )
+    assert settings.ai_api_key.get_secret_value() == "test-secret-value"
+    assert "test-secret-value" not in repr(settings)
+    with pytest.raises(ValidationError, match="ai_api_key"):
+        APISettings(
+            ai_inference_provider="openai-compatible",
+            ai_endpoint_url="https://api.example.com/v1/responses",
+            _env_file=None,
+        )
+    with pytest.raises(ValidationError, match="must use HTTPS"):
+        APISettings(
+            ai_inference_provider="openai-compatible",
+            ai_endpoint_url="http://api.example.com/v1/responses",
+            ai_api_key="secret", _env_file=None,
+        )
+    with pytest.raises(ValidationError, match="must not contain credentials"):
+        APISettings(
+            ai_inference_provider="openai-compatible",
+            ai_endpoint_url="https://user:pass@api.example.com/v1/responses",
+            ai_api_key="secret", _env_file=None,
+        )
+
+
 def test_short_token_secret_is_rejected():
     with pytest.raises(ValidationError, match="token_signing_secret"):
         APISettings(token_signing_secret="too-short", _env_file=None)

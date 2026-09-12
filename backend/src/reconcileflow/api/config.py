@@ -93,6 +93,13 @@ class APISettings(BaseSettings):
     ai_candidate_max_amount_difference_ratio: Decimal = Field(
         default=Decimal("0.25"), ge=Decimal("0"), le=Decimal("1")
     )
+    ai_endpoint_url: str | None = None
+    ai_api_key: SecretStr | None = None
+    ai_connect_timeout_seconds: float = Field(default=5, ge=0.1, le=60)
+    ai_read_timeout_seconds: float = Field(default=30, ge=0.1, le=120)
+    ai_max_retries: int = Field(default=2, ge=0, le=5)
+    ai_retry_backoff_seconds: float = Field(default=0.25, ge=0, le=10)
+    ai_maximum_response_bytes: int = Field(default=262144, ge=1024, le=1048576)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:
@@ -105,6 +112,11 @@ class APISettings(BaseSettings):
             raise ValueError("default_job_timeout_seconds must not exceed maximum_job_timeout_seconds")
         if self.ai_max_suggestions_per_response > self.ai_max_candidates_per_request:
             raise ValueError("AI suggestion limit must not exceed candidate limit")
+        if self.ai_inference_provider == "openai-compatible":
+            if self.ai_api_key is None or not self.ai_api_key.get_secret_value().strip():
+                raise ValueError("hosted AI inference requires ai_api_key")
+            if not self.ai_endpoint_url:
+                raise ValueError("hosted AI inference requires ai_endpoint_url")
         if (self.s3_access_key_id is None) != (self.s3_secret_access_key is None):
             raise ValueError("S3 access key ID and secret access key must be configured together")
         if self.storage_provider == "s3":
@@ -174,6 +186,20 @@ class APISettings(BaseSettings):
     @classmethod
     def validate_ai_inference_provider(cls, value: str) -> str:
         provider = value.strip().lower()
-        if provider not in {"disabled", "deterministic"}:
-            raise ValueError("ai_inference_provider must be 'disabled' or 'deterministic'")
+        if provider not in {"disabled", "deterministic", "openai-compatible"}:
+            raise ValueError("ai_inference_provider is unsupported")
         return provider
+
+    @field_validator("ai_endpoint_url")
+    @classmethod
+    def validate_ai_endpoint_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        endpoint = urlsplit(value.strip())
+        if endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
+            raise ValueError("AI endpoint URL must not contain credentials, query, or fragment")
+        if endpoint.scheme not in {"http", "https"} or not endpoint.hostname:
+            raise ValueError("AI endpoint URL must be an absolute HTTP or HTTPS URL")
+        if endpoint.scheme != "https" and endpoint.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("AI endpoint URL must use HTTPS outside local development")
+        return value.strip()

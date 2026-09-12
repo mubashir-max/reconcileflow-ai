@@ -44,6 +44,13 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         model_version=resolved.ai_model_version,
         max_candidates=resolved.ai_max_candidates_per_request,
         max_suggestions=resolved.ai_max_suggestions_per_response,
+        endpoint_url=resolved.ai_endpoint_url,
+        api_key=resolved.ai_api_key.get_secret_value() if resolved.ai_api_key else None,
+        connect_timeout_seconds=resolved.ai_connect_timeout_seconds,
+        read_timeout_seconds=resolved.ai_read_timeout_seconds,
+        max_retries=resolved.ai_max_retries,
+        retry_backoff_seconds=resolved.ai_retry_backoff_seconds,
+        maximum_response_bytes=resolved.ai_maximum_response_bytes,
     )
     ai_candidate_generator = ReconciliationCandidateGenerator(
         maximum_candidates=resolved.ai_max_candidates_per_request,
