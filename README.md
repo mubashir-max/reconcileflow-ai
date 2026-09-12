@@ -75,6 +75,7 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Strictly validated, bounded suggestions with versioned model and prompt metadata
 - Deterministic, tenant-scoped candidate generation with amount, date, currency, and local reference signals
 - Atomic advisory suggestion generation that validates provider output before persistence
+- Tenant-isolated API endpoints for suggestion generation, inspection, and one-time review decisions
 
 ## Architecture
 
