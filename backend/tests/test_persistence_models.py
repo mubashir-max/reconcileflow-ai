@@ -29,6 +29,7 @@ def test_metadata_defines_complete_schema() -> None:
         "background_jobs", "background_job_events", "workers",
         "ai_match_suggestions",
         "ai_usage_records",
+        "ai_inference_events",
     }
 
 

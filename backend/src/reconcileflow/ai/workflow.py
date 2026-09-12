@@ -15,6 +15,7 @@ from reconcileflow.persistence.unit_of_work import PersistenceUnitOfWork
 
 from .candidates import CandidateSourceRecord, GeneratedCandidate, ReconciliationCandidateGenerator
 from .inference import (
+    AIInferenceDisabledError,
     AIInferenceError,
     AIInferenceProvider,
     AIInferenceRequest,
@@ -22,6 +23,7 @@ from .inference import (
 )
 
 if TYPE_CHECKING:
+    from .observability import AIInferenceObserver
     from .usage import AIUsageController
 
 
@@ -34,6 +36,7 @@ class AIMatchSuggestionWorkflow:
         prompt_version: str, inference_config_version: str,
         timeout_seconds: float, suggestion_ttl_days: int = 7,
         usage_controller: AIUsageController | None = None,
+        observer: AIInferenceObserver | None = None,
     ) -> None:
         self._candidate_generator = candidate_generator
         self._inference_provider = inference_provider
@@ -49,6 +52,7 @@ class AIMatchSuggestionWorkflow:
         self._timeout_seconds = timeout_seconds
         self._suggestion_ttl_days = suggestion_ttl_days
         self._usage_controller = usage_controller
+        self._observer = observer
 
     async def generate_and_persist(
         self, *, session: Session, organization_id: uuid.UUID, run_id: uuid.UUID,
@@ -67,23 +71,37 @@ class AIMatchSuggestionWorkflow:
             features=tuple(candidate.features for candidate in candidates),
             prompt_version=self._prompt_version,
         )
+        event_id = self._observer.start(
+            organization_id=organization_id, run_id=run_id, candidate_count=len(candidates)
+        ) if self._observer is not None else None
         reservation_id = None
-        if self._usage_controller is not None:
-            reservation_id = self._usage_controller.reserve(
-                organization_id=organization_id, run_id=run_id,
-                candidate_count=len(candidates),
-            )
         try:
+            if self._usage_controller is not None:
+                reservation_id = self._usage_controller.reserve(
+                    organization_id=organization_id, run_id=run_id,
+                    candidate_count=len(candidates),
+                )
             async with asyncio.timeout(self._timeout_seconds):
                 response = await self._inference_provider.infer(request)
             validated = _map_response(response, candidates, self._prompt_version)
         except TimeoutError as error:
             if reservation_id is not None:
                 self._usage_controller.release(reservation_id, organization_id=organization_id)
+            if event_id is not None:
+                self._observer.complete(event_id, organization_id=organization_id, outcome="TIMED_OUT", error_code="INFERENCE_TIMEOUT")
             raise AIInferenceError("AI inference exceeded the configured timeout") from error
-        except BaseException:
+        except BaseException as error:
             if reservation_id is not None:
                 self._usage_controller.release(reservation_id, organization_id=organization_id)
+            if event_id is not None:
+                from .usage import AIUsageLimitError
+                if isinstance(error, AIUsageLimitError):
+                    outcome, code = "QUOTA_REJECTED", "USAGE_POLICY_REJECTED"
+                elif isinstance(error, AIInferenceDisabledError):
+                    outcome, code = "DISABLED", "INFERENCE_DISABLED"
+                else:
+                    outcome, code = "FAILED", "INFERENCE_FAILED"
+                self._observer.complete(event_id, organization_id=organization_id, outcome=outcome, error_code=code)
             raise
         if reservation_id is not None:
             self._usage_controller.finalize(
@@ -117,6 +135,12 @@ class AIMatchSuggestionWorkflow:
                     inference_config_version=self._inference_config_version,
                     expires_at=expires_at,
                 ))
+        if event_id is not None:
+            self._observer.complete(
+                event_id, organization_id=organization_id, outcome="SUCCEEDED",
+                suggestion_count=len(persisted), input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+            )
         return tuple(persisted)
 
 

@@ -78,6 +78,8 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Tenant-isolated API endpoints for suggestion generation, inspection, and one-time review decisions
 - Optional OpenAI-compatible hosted inference with structured output, HTTPS, strict timeouts, and bounded retries
 - Synthetic provider-independent quality evaluation with aggregate privacy-safe reports and CI thresholds
+- Organization-scoped hosted-AI request and token limits with pre-call reservations
+- Privacy-safe inference lifecycle events with tenant-isolated operational inspection
 
 ## Architecture
 

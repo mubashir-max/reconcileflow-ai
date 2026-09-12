@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
-from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency, StorageQuotaExceededError
+from reconcileflow.persistence import Page, PersistenceUnitOfWork, SessionDependency, StorageQuotaExceededError
 
 from ..auth_dependencies import CurrentUserDependency, MembershipManagerDependency, TenantContextDependency
 from ..errors import APIError
@@ -20,6 +20,8 @@ from ..organization_schemas import (
     OrganizationAIUsagePolicy,
     OrganizationAIUsageResponse,
     UpdateOrganizationAIUsagePolicyRequest,
+    AIInferenceEventListResponse,
+    AIInferenceEventResponse,
 )
 from ..schemas import ErrorResponse
 
@@ -210,3 +212,25 @@ def update_ai_usage_policy(
             },
         )
     return _ai_policy(record)
+
+
+@router.get("/{organization_id}/ai-inference-events", response_model=AIInferenceEventListResponse, responses=ERROR_RESPONSES)
+def list_ai_inference_events(
+    organization_id: uuid.UUID, session: SessionDependency,
+    tenant: TenantContextDependency, outcome: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100), offset: int = Query(default=0, ge=0),
+) -> AIInferenceEventListResponse:
+    _ensure_selected(organization_id, tenant.organization_id)
+    records = PersistenceUnitOfWork(session).ai_inference_events.list_for_organization(
+        organization_id, page=Page(limit=limit, offset=offset), outcome=outcome,
+    )
+    return AIInferenceEventListResponse(items=[AIInferenceEventResponse.model_validate({
+        "id": item.id, "run_id": item.run_id, "outcome": item.outcome,
+        "provider": item.provider, "model_version": item.model_version,
+        "prompt_version": item.prompt_version,
+        "inference_config_version": item.inference_config_version,
+        "candidate_count": item.candidate_count, "suggestion_count": item.suggestion_count,
+        "input_tokens": item.input_tokens, "output_tokens": item.output_tokens,
+        "duration_ms": item.duration_ms, "error_code": item.error_code,
+        "created_at": item.created_at, "completed_at": item.completed_at,
+    }) for item in records])

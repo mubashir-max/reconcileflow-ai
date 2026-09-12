@@ -11,6 +11,7 @@ from .errors import PersistenceConflictError
 from .repositories import (
     AuditEventRepository,
     AIMatchSuggestionRepository,
+    AIInferenceEventRepository,
     AIUsageRepository,
     BackgroundJobEventRepository,
     BackgroundJobRepository,
@@ -38,6 +39,7 @@ class PersistenceUnitOfWork:
         self.results = ReconciliationResultRepository(session)
         self.audit_events = AuditEventRepository(session)
         self.ai_match_suggestions = AIMatchSuggestionRepository(session)
+        self.ai_inference_events = AIInferenceEventRepository(session)
         self.ai_usage = AIUsageRepository(session)
         self.background_jobs = BackgroundJobRepository(session)
         self.background_job_events = BackgroundJobEventRepository(session)

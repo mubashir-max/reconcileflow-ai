@@ -21,6 +21,7 @@ from .errors import InvalidStatusTransitionError, PersistenceConflictError, Reco
 from .models import (
     AuditEventRecord,
     AIMatchSuggestionRecord,
+    AIInferenceEventRecord,
     AIUsageRecord,
     BACKGROUND_JOB_STATUSES,
     BACKGROUND_JOB_PRIORITIES,
@@ -1553,6 +1554,63 @@ class AIUsageRepository:
             AIUsageRecord.created_at >= _utc(since), active,
         )).one()
         return int(requests), int(tokens)
+
+
+class AIInferenceEventRepository:
+    """Tenant-scoped, aggregate-only AI operational events."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(self, *, organization_id: uuid.UUID, run_id: uuid.UUID, provider: str,
+               model_version: str, prompt_version: str, inference_config_version: str,
+               candidate_count: int) -> AIInferenceEventRecord:
+        run_exists = self._session.scalar(select(ReconciliationRunRecord.id).where(
+            ReconciliationRunRecord.id == run_id,
+            ReconciliationRunRecord.organization_id == organization_id,
+        ))
+        if run_exists is None:
+            raise RecordNotFoundError(f"reconciliation run {run_id} was not found")
+        record = AIInferenceEventRecord(
+            organization_id=organization_id, run_id=run_id, provider=provider,
+            model_version=model_version, prompt_version=prompt_version,
+            inference_config_version=inference_config_version,
+            candidate_count=candidate_count,
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def complete(self, event_id: uuid.UUID, *, organization_id: uuid.UUID,
+                 outcome: str, suggestion_count: int, input_tokens: int,
+                 output_tokens: int, duration_ms: int, error_code: str | None,
+                 completed_at: datetime) -> AIInferenceEventRecord:
+        record = self._session.scalar(select(AIInferenceEventRecord).where(
+            AIInferenceEventRecord.id == event_id,
+            AIInferenceEventRecord.organization_id == organization_id,
+        ).with_for_update())
+        if record is None:
+            raise RecordNotFoundError(f"AI inference event {event_id} was not found")
+        if record.outcome != "REQUESTED":
+            raise PersistenceConflictError("AI inference event is already complete")
+        record.outcome = outcome
+        record.suggestion_count = suggestion_count
+        record.input_tokens = input_tokens
+        record.output_tokens = output_tokens
+        record.duration_ms = duration_ms
+        record.error_code = error_code
+        record.completed_at = _utc(completed_at)
+        self._session.flush()
+        return record
+
+    def list_for_organization(self, organization_id: uuid.UUID, *, page: Page = Page(),
+                              outcome: str | None = None) -> list[AIInferenceEventRecord]:
+        statement = select(AIInferenceEventRecord).where(AIInferenceEventRecord.organization_id == organization_id)
+        if outcome is not None:
+            statement = statement.where(AIInferenceEventRecord.outcome == outcome)
+        return list(self._session.scalars(statement.order_by(
+            AIInferenceEventRecord.created_at.desc(), AIInferenceEventRecord.id.desc()
+        ).limit(page.limit).offset(page.offset)))
 
 
 class ReconciliationResultRepository:
