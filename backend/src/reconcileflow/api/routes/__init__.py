@@ -11,6 +11,7 @@ from .memberships import router as memberships_router
 from .organizations import router as organizations_router
 from .security_audit import router as security_audit_router
 from .jobs import router as jobs_router
+from .ai_suggestions import router as ai_suggestions_router
 
 
 api_router = APIRouter()
@@ -23,5 +24,6 @@ api_router.include_router(memberships_router)
 api_router.include_router(organizations_router)
 api_router.include_router(security_audit_router)
 api_router.include_router(jobs_router)
+api_router.include_router(ai_suggestions_router)
 
 __all__ = ["api_router"]

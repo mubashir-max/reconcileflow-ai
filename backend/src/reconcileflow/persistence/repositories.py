@@ -1377,6 +1377,20 @@ class AIMatchSuggestionRepository:
             .limit(page.limit).offset(page.offset)
         ))
 
+    def count_for_run(
+        self, run_id: uuid.UUID, *, organization_id: uuid.UUID,
+        status: MatchSuggestionStatus | str | None = None,
+    ) -> int:
+        statement = select(func.count()).select_from(AIMatchSuggestionRecord).where(
+            AIMatchSuggestionRecord.run_id == run_id,
+            AIMatchSuggestionRecord.organization_id == organization_id,
+        )
+        if status is not None:
+            statement = statement.where(
+                AIMatchSuggestionRecord.status == MatchSuggestionStatus(status).value
+            )
+        return self._session.scalar(statement) or 0
+
     def resolve(
         self, suggestion_id: uuid.UUID, *, organization_id: uuid.UUID,
         reviewer_user_id: uuid.UUID, decision: MatchSuggestionStatus | str,
