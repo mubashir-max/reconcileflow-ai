@@ -7,6 +7,8 @@ from .errors import InvalidStatusTransitionError, PersistenceConflictError, Pers
 from .models import (
     AuditEventRecord,
     AIMatchSuggestionRecord,
+    AIInferenceEventRecord,
+    AI_INFERENCE_OUTCOMES,
     AIUsageRecord,
     AI_USAGE_STATUSES,
     AI_SUGGESTION_STATUSES,
@@ -32,6 +34,7 @@ from .models import (
 from .repositories import (
     AuditEventRepository,
     AIMatchSuggestionRepository,
+    AIInferenceEventRepository,
     AIUsageRepository,
     BackgroundJobEventRepository,
     BackgroundJobRepository,
@@ -54,6 +57,9 @@ __all__ = [
     "AuditEventRepository",
     "AIMatchSuggestionRecord",
     "AIMatchSuggestionRepository",
+    "AIInferenceEventRecord",
+    "AIInferenceEventRepository",
+    "AI_INFERENCE_OUTCOMES",
     "AIUsageRecord",
     "AIUsageRepository",
     "AI_USAGE_STATUSES",

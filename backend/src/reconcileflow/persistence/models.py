@@ -60,6 +60,7 @@ BACKGROUND_JOB_EVENT_TYPES = (
 WORKER_STATUSES = ("RUNNING", "STOPPED")
 AI_SUGGESTION_STATUSES = ("PENDING", "ACCEPTED", "REJECTED", "EXPIRED")
 AI_USAGE_STATUSES = ("RESERVED", "FINALIZED", "RELEASED")
+AI_INFERENCE_OUTCOMES = ("REQUESTED", "SUCCEEDED", "FAILED", "TIMED_OUT", "DISABLED", "QUOTA_REJECTED")
 
 
 class OrganizationRecord(Base):
@@ -102,6 +103,7 @@ class OrganizationRecord(Base):
     )
     ai_match_suggestions: Mapped[list[AIMatchSuggestionRecord]] = relationship(back_populates="organization")
     ai_usage_records: Mapped[list[AIUsageRecord]] = relationship(back_populates="organization")
+    ai_inference_events: Mapped[list[AIInferenceEventRecord]] = relationship(back_populates="organization")
 
 
 class UserRecord(Base):
@@ -459,6 +461,41 @@ class AIUsageRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     organization: Mapped[OrganizationRecord] = relationship(back_populates="ai_usage_records")
+
+
+class AIInferenceEventRecord(Base):
+    """Privacy-safe operational outcome for one AI inference request."""
+
+    __tablename__ = "ai_inference_events"
+    __table_args__ = (
+        CheckConstraint(f"outcome IN {AI_INFERENCE_OUTCOMES}", name="valid_outcome"),
+        CheckConstraint("candidate_count >= 0", name="nonnegative_candidate_count"),
+        CheckConstraint("suggestion_count >= 0", name="nonnegative_suggestion_count"),
+        CheckConstraint("input_tokens >= 0", name="nonnegative_input_tokens"),
+        CheckConstraint("output_tokens >= 0", name="nonnegative_output_tokens"),
+        CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="nonnegative_duration_ms"),
+        Index("ix_ai_inference_events_org_created", "organization_id", "created_at"),
+        Index("ix_ai_inference_events_org_outcome", "organization_id", "outcome", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reconciliation_runs.id", ondelete="RESTRICT"), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False, default="REQUESTED", server_default="REQUESTED")
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(150), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    inference_config_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    suggestion_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(50))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="ai_inference_events")
 
 
 class ReconciliationResultRecord(Base):

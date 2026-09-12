@@ -82,3 +82,25 @@ class OrganizationAIUsageResponse(OrganizationAIUsagePolicy):
     daily_tokens: int = Field(ge=0)
     monthly_requests: int = Field(ge=0)
     monthly_tokens: int = Field(ge=0)
+
+
+class AIInferenceEventResponse(StrictModel):
+    id: uuid.UUID
+    run_id: uuid.UUID
+    outcome: str
+    provider: str
+    model_version: str
+    prompt_version: str
+    inference_config_version: str
+    candidate_count: int = Field(ge=0)
+    suggestion_count: int = Field(ge=0)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
+    error_code: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class AIInferenceEventListResponse(StrictModel):
+    items: list[AIInferenceEventResponse]

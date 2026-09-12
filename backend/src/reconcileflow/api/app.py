@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from reconcileflow.ai import ReconciliationCandidateGenerator, create_ai_inference_provider
 from reconcileflow.ai.workflow import AIMatchSuggestionWorkflow
 from reconcileflow.ai.usage import AIUsageController
+from reconcileflow.ai.observability import AIInferenceObserver
 from reconcileflow.persistence.database import Database
 from reconcileflow.storage import create_file_storage
 
@@ -65,6 +66,11 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         estimated_tokens_per_candidate=resolved.ai_estimated_tokens_per_candidate,
         reservation_ttl_seconds=resolved.ai_usage_reservation_ttl_seconds,
     )
+    ai_inference_observer = AIInferenceObserver(
+        session_provider=database.session, provider=resolved.ai_inference_provider,
+        model_version=resolved.ai_model_version, prompt_version=resolved.ai_prompt_version,
+        inference_config_version=resolved.ai_inference_config_version,
+    )
     ai_match_suggestion_workflow = AIMatchSuggestionWorkflow(
         candidate_generator=ai_candidate_generator,
         inference_provider=ai_inference_provider,
@@ -73,6 +79,7 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         inference_config_version=resolved.ai_inference_config_version,
         timeout_seconds=resolved.ai_inference_timeout_seconds,
         usage_controller=ai_usage_controller,
+        observer=ai_inference_observer,
     )
 
     @asynccontextmanager
@@ -94,6 +101,7 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
     app.state.ai_candidate_generator = ai_candidate_generator
     app.state.ai_match_suggestion_workflow = ai_match_suggestion_workflow
     app.state.ai_usage_controller = ai_usage_controller
+    app.state.ai_inference_observer = ai_inference_observer
     register_exception_handlers(app)
     app.include_router(api_router, prefix=resolved.api_prefix)
 
