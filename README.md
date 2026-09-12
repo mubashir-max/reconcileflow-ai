@@ -74,6 +74,7 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Privacy-minimized inference inputs containing derived signals instead of source rows or business text
 - Strictly validated, bounded suggestions with versioned model and prompt metadata
 - Deterministic, tenant-scoped candidate generation with amount, date, currency, and local reference signals
+- Atomic advisory suggestion generation that validates provider output before persistence
 
 ## Architecture
 
