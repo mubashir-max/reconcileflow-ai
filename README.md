@@ -77,6 +77,7 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Atomic advisory suggestion generation that validates provider output before persistence
 - Tenant-isolated API endpoints for suggestion generation, inspection, and one-time review decisions
 - Optional OpenAI-compatible hosted inference with structured output, HTTPS, strict timeouts, and bounded retries
+- Synthetic provider-independent quality evaluation with aggregate privacy-safe reports and CI thresholds
 
 ## Architecture
 
@@ -396,6 +397,14 @@ Docker Compose starts the worker automatically. For a directly installed develop
 ```powershell
 python -m reconcileflow.worker
 ```
+
+Run the synthetic, zero-cost AI quality gate with:
+
+```powershell
+python -m reconcileflow.ai.evaluate
+```
+
+The report contains aggregate metrics and safe version metadata only. Hosted evaluation is never automatic; it requires both `--provider openai-compatible` and `--allow-paid-live-provider`, plus an API key injected through the runtime environment. Running that explicit command may consume provider credits.
 
 ### Database migrations
 

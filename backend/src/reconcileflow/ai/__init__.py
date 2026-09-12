@@ -1,6 +1,12 @@
 """Provider-independent foundations for advisory AI-assisted matching."""
 
 from .models import CandidateRecordSet, MatchSuggestionStatus
+from .evaluation import (
+    AISuggestionEvaluator,
+    EvaluationCase,
+    EvaluationReport,
+    EvaluationThresholds,
+)
 from .openai_compatible import OpenAICompatibleInferenceProvider
 from .candidates import (
     CandidateSourceRecord,
@@ -30,4 +36,5 @@ __all__ = [
     "DisabledAIInferenceProvider", "MatchSuggestionStatus", "NormalizedMatchFeatures",
     "ReconciliationCandidateGenerator", "create_ai_inference_provider",
     "OpenAICompatibleInferenceProvider",
+    "AISuggestionEvaluator", "EvaluationCase", "EvaluationReport", "EvaluationThresholds",
 ]

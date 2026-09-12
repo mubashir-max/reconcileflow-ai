@@ -207,6 +207,22 @@ def test_hosted_ai_settings_protect_credentials_and_require_https():
             ai_endpoint_url="http://api.example.com/v1/responses",
             ai_api_key="secret", _env_file=None,
         )
+
+
+def test_ai_evaluation_thresholds_are_validated():
+    settings = APISettings(
+        ai_evaluation_min_precision=0.9,
+        ai_evaluation_min_recall=0.85,
+        ai_evaluation_min_coverage=0.75,
+        ai_evaluation_maximum_brier_score=0.2,
+        _env_file=None,
+    )
+    assert settings.ai_evaluation_min_precision == 0.9
+    assert settings.ai_evaluation_maximum_brier_score == 0.2
+    with pytest.raises(ValidationError):
+        APISettings(ai_evaluation_min_precision=1.1, _env_file=None)
+    with pytest.raises(ValidationError):
+        APISettings(ai_evaluation_maximum_brier_score=-0.1, _env_file=None)
     with pytest.raises(ValidationError, match="must not contain credentials"):
         APISettings(
             ai_inference_provider="openai-compatible",
