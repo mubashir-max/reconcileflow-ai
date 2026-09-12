@@ -1,6 +1,12 @@
 """Provider-independent foundations for advisory AI-assisted matching."""
 
 from .models import CandidateRecordSet, MatchSuggestionStatus
+from .candidates import (
+    CandidateSourceRecord,
+    CandidateSourceType,
+    GeneratedCandidate,
+    ReconciliationCandidateGenerator,
+)
 from .inference import (
     AIInferenceDisabledError,
     AIInferenceError,
@@ -19,6 +25,7 @@ __all__ = [
     "AIInferenceDisabledError", "AIInferenceError", "AIInferenceProvider",
     "AIInferenceRequest", "AIInferenceResponse", "AIInferenceResponseError",
     "AIInferenceSuggestion", "CandidateRecordSet", "DeterministicAIInferenceProvider",
+    "CandidateSourceRecord", "CandidateSourceType", "GeneratedCandidate",
     "DisabledAIInferenceProvider", "MatchSuggestionStatus", "NormalizedMatchFeatures",
-    "create_ai_inference_provider",
+    "ReconciliationCandidateGenerator", "create_ai_inference_provider",
 ]

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 from pydantic import ValidationError
 
@@ -161,6 +163,8 @@ def test_ai_inference_settings_are_safe_and_validated():
     settings = APISettings(_env_file=None)
     assert settings.ai_inference_provider == "disabled"
     assert settings.ai_inference_timeout_seconds == 10.0
+    assert settings.ai_candidate_max_date_difference_days == 30
+    assert settings.ai_candidate_max_amount_difference_ratio == Decimal("0.25")
     configured = APISettings(
         ai_inference_provider="DETERMINISTIC",
         ai_model_version="local-v2",

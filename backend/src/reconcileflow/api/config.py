@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from enum import StrEnum
 from importlib.metadata import version
 from pathlib import Path
@@ -87,6 +88,10 @@ class APISettings(BaseSettings):
     ai_inference_timeout_seconds: float = Field(default=10.0, ge=0.1, le=120.0)
     ai_max_candidates_per_request: int = Field(default=100, ge=1, le=1000)
     ai_max_suggestions_per_response: int = Field(default=20, ge=1, le=100)
+    ai_candidate_max_date_difference_days: int = Field(default=30, ge=0, le=365)
+    ai_candidate_max_amount_difference_ratio: Decimal = Field(
+        default=Decimal("0.25"), ge=Decimal("0"), le=Decimal("1")
+    )
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:
