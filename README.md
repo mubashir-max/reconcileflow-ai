@@ -76,6 +76,7 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Deterministic, tenant-scoped candidate generation with amount, date, currency, and local reference signals
 - Atomic advisory suggestion generation that validates provider output before persistence
 - Tenant-isolated API endpoints for suggestion generation, inspection, and one-time review decisions
+- Optional OpenAI-compatible hosted inference with structured output, HTTPS, strict timeouts, and bounded retries
 
 ## Architecture
 

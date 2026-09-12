@@ -151,7 +151,11 @@ class DeterministicAIInferenceProvider:
 
 
 def create_ai_inference_provider(
-    provider: str, *, model_version: str, max_candidates: int, max_suggestions: int
+    provider: str, *, model_version: str, max_candidates: int, max_suggestions: int,
+    endpoint_url: str | None = None, api_key: str | None = None,
+    connect_timeout_seconds: float = 5, read_timeout_seconds: float = 30,
+    max_retries: int = 2, retry_backoff_seconds: float = 0.25,
+    maximum_response_bytes: int = 262144,
 ) -> AIInferenceProvider:
     if provider == "disabled":
         return DisabledAIInferenceProvider()
@@ -160,5 +164,16 @@ def create_ai_inference_provider(
             model_version=model_version,
             max_candidates=max_candidates,
             max_suggestions=max_suggestions,
+        )
+    if provider == "openai-compatible":
+        if not endpoint_url or not api_key:
+            raise ValueError("hosted AI inference requires an endpoint and API key")
+        from .openai_compatible import OpenAICompatibleInferenceProvider
+        return OpenAICompatibleInferenceProvider(
+            endpoint_url=endpoint_url, api_key=api_key, model_version=model_version,
+            connect_timeout_seconds=connect_timeout_seconds,
+            read_timeout_seconds=read_timeout_seconds, max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff_seconds,
+            maximum_response_bytes=maximum_response_bytes,
         )
     raise ValueError("unsupported AI inference provider")
