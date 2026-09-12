@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from reconcileflow.ai import AIInferenceProvider, ReconciliationCandidateGenerator
+from reconcileflow.ai.workflow import AIMatchSuggestionWorkflow
 
 
 def get_ai_inference_provider(request: Request) -> AIInferenceProvider:
@@ -20,4 +21,13 @@ def get_ai_candidate_generator(request: Request) -> ReconciliationCandidateGener
 
 AIReconciliationCandidateGeneratorDependency = Annotated[
     ReconciliationCandidateGenerator, Depends(get_ai_candidate_generator)
+]
+
+
+def get_ai_match_suggestion_workflow(request: Request) -> AIMatchSuggestionWorkflow:
+    return request.app.state.ai_match_suggestion_workflow
+
+
+AIMatchSuggestionWorkflowDependency = Annotated[
+    AIMatchSuggestionWorkflow, Depends(get_ai_match_suggestion_workflow)
 ]
