@@ -66,6 +66,14 @@ All repository fixtures are synthetic and anonymized. They contain no real custo
 - Docker Compose MinIO service with persistent private object storage
 - Sanitized storage failures and operational reports without secrets or object identifiers
 
+## v0.6 capabilities
+
+- Persisted advisory AI match-suggestion foundation
+- Provider-independent AI inference contract with disabled-by-default behavior
+- Deterministic local inference for development and CI
+- Privacy-minimized inference inputs containing derived signals instead of source rows or business text
+- Strictly validated, bounded suggestions with versioned model and prompt metadata
+
 ## Architecture
 
 ```text

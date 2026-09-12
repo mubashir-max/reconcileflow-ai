@@ -81,6 +81,12 @@ class APISettings(BaseSettings):
     default_job_timeout_seconds: int = Field(default=900, ge=30, le=86400)
     maximum_job_timeout_seconds: int = Field(default=3600, ge=30, le=86400)
     job_priority_aging_seconds: int = Field(default=300, ge=30, le=86400)
+    ai_inference_provider: str = "disabled"
+    ai_model_version: str = Field(default="deterministic-v1", min_length=1, max_length=100)
+    ai_prompt_version: str = Field(default="match-suggestion-v1", min_length=1, max_length=100)
+    ai_inference_timeout_seconds: float = Field(default=10.0, ge=0.1, le=120.0)
+    ai_max_candidates_per_request: int = Field(default=100, ge=1, le=1000)
+    ai_max_suggestions_per_response: int = Field(default=20, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_token_security(self) -> APISettings:
@@ -91,6 +97,8 @@ class APISettings(BaseSettings):
             raise ValueError("production requires a non-default token_signing_secret")
         if self.default_job_timeout_seconds > self.maximum_job_timeout_seconds:
             raise ValueError("default_job_timeout_seconds must not exceed maximum_job_timeout_seconds")
+        if self.ai_max_suggestions_per_response > self.ai_max_candidates_per_request:
+            raise ValueError("AI suggestion limit must not exceed candidate limit")
         if (self.s3_access_key_id is None) != (self.s3_secret_access_key is None):
             raise ValueError("S3 access key ID and secret access key must be configured together")
         if self.storage_provider == "s3":
@@ -120,7 +128,10 @@ class APISettings(BaseSettings):
             raise ValueError("database_url must use postgresql+psycopg or sqlite+pysqlite")
         return SecretStr(url)
 
-    @field_validator("app_name", "app_version", "token_issuer", "token_audience", "worker_id")
+    @field_validator(
+        "app_name", "app_version", "token_issuer", "token_audience", "worker_id",
+        "ai_model_version", "ai_prompt_version",
+    )
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -151,4 +162,12 @@ class APISettings(BaseSettings):
         provider = value.strip().lower()
         if provider not in {"local", "s3"}:
             raise ValueError("storage_provider must be 'local' or 's3'")
+        return provider
+
+    @field_validator("ai_inference_provider")
+    @classmethod
+    def validate_ai_inference_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider not in {"disabled", "deterministic"}:
+            raise ValueError("ai_inference_provider must be 'disabled' or 'deterministic'")
         return provider

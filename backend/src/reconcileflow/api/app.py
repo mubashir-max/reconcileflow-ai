@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from reconcileflow.ai import create_ai_inference_provider
 from reconcileflow.persistence.database import Database
 from reconcileflow.storage import create_file_storage
 
@@ -37,6 +38,12 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         s3_read_timeout_seconds=resolved.s3_read_timeout_seconds,
         s3_auto_create_bucket=resolved.s3_auto_create_bucket,
     )
+    ai_inference_provider = create_ai_inference_provider(
+        resolved.ai_inference_provider,
+        model_version=resolved.ai_model_version,
+        max_candidates=resolved.ai_max_candidates_per_request,
+        max_suggestions=resolved.ai_max_suggestions_per_response,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -53,6 +60,7 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.database = database
     app.state.file_storage = file_storage
+    app.state.ai_inference_provider = ai_inference_provider
     register_exception_handlers(app)
     app.include_router(api_router, prefix=resolved.api_prefix)
 

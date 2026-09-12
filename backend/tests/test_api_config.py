@@ -157,6 +157,29 @@ def test_worker_settings_are_validated():
         APISettings(job_priority_aging_seconds=29, _env_file=None)
 
 
+def test_ai_inference_settings_are_safe_and_validated():
+    settings = APISettings(_env_file=None)
+    assert settings.ai_inference_provider == "disabled"
+    assert settings.ai_inference_timeout_seconds == 10.0
+    configured = APISettings(
+        ai_inference_provider="DETERMINISTIC",
+        ai_model_version="local-v2",
+        ai_prompt_version="prompt-v2",
+        ai_max_candidates_per_request=5,
+        ai_max_suggestions_per_response=3,
+        _env_file=None,
+    )
+    assert configured.ai_inference_provider == "deterministic"
+    with pytest.raises(ValidationError, match="ai_inference_provider"):
+        APISettings(ai_inference_provider="remote-unknown", _env_file=None)
+    with pytest.raises(ValidationError, match="suggestion limit"):
+        APISettings(
+            ai_max_candidates_per_request=2,
+            ai_max_suggestions_per_response=3,
+            _env_file=None,
+        )
+
+
 def test_short_token_secret_is_rejected():
     with pytest.raises(ValidationError, match="token_signing_secret"):
         APISettings(token_signing_secret="too-short", _env_file=None)
