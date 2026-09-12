@@ -1,6 +1,6 @@
 # ReconcileFlow AI
 
-ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.5 adds private cloud object storage and secure file-lifecycle operations to the multi-tenant FastAPI, PostgreSQL, and background-worker platform.
+ReconcileFlow AI matches bank transactions, ERP invoices, and payment-gateway settlements. Version 0.6 adds privacy-minimized, explainable AI match suggestions with tenant controls, evaluation, usage limits, and operational auditing to the multi-tenant platform.
 
 All repository fixtures are synthetic and anonymized. They contain no real customers, accounts, cards, or payments.
 
@@ -304,7 +304,7 @@ Start the local service with Docker Compose:
 docker compose up --build -d
 ```
 
-Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.5 endpoints are:
+Interactive API documentation is available at `http://localhost:8000/docs`. The principal v0.6 endpoints are:
 
 | Method and path | Purpose |
 | --- | --- |
@@ -321,6 +321,9 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `GET/PATCH /api/v1/organizations/{organization_id}` | View or rename an organization. |
 | `GET /api/v1/organizations/{organization_id}/storage-usage` | Retrieve tenant storage usage and remaining quota. |
 | `PATCH /api/v1/organizations/{organization_id}/storage-quota` | Update storage quota as OWNER or ADMIN. |
+| `GET /api/v1/organizations/{organization_id}/ai-usage` | Retrieve aggregate tenant AI usage and configured limits. |
+| `PATCH /api/v1/organizations/{organization_id}/ai-usage-policy` | Enable hosted AI and update request/token limits as OWNER or ADMIN. |
+| `GET /api/v1/organizations/{organization_id}/ai-inference-events` | List privacy-safe tenant AI operational events. |
 | `GET/POST /api/v1/organizations/{organization_id}/members` | List or add members. |
 | `PATCH/DELETE /api/v1/organizations/{organization_id}/members/{membership_id}` | Change a role or deactivate membership. |
 | `GET /api/v1/organizations/{organization_id}/security-audit-events` | List security events as OWNER or ADMIN. |
@@ -345,6 +348,9 @@ Interactive API documentation is available at `http://localhost:8000/docs`. The 
 | `GET /api/v1/reconciliation-runs/{run_id}/results` | List and filter persisted results. |
 | `GET /api/v1/results/{result_id}` | Retrieve one explainable result. |
 | `GET /api/v1/reconciliation-runs/{run_id}/audit-events` | Retrieve ordered audit events. |
+| `POST /api/v1/ai-match-suggestions/runs/{run_id}/generate` | Generate advisory suggestions from privacy-minimized candidate features. |
+| `GET /api/v1/ai-match-suggestions/runs/{run_id}` | List tenant-scoped suggestions for a completed run. |
+| `POST /api/v1/ai-match-suggestions/{suggestion_id}/decision` | Accept or reject a pending advisory suggestion once. |
 
 ### End-to-end API workflow
 
