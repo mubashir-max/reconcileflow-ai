@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from reconcileflow.ai import create_ai_inference_provider
+from reconcileflow.ai import ReconciliationCandidateGenerator, create_ai_inference_provider
 from reconcileflow.persistence.database import Database
 from reconcileflow.storage import create_file_storage
 
@@ -44,6 +44,11 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         max_candidates=resolved.ai_max_candidates_per_request,
         max_suggestions=resolved.ai_max_suggestions_per_response,
     )
+    ai_candidate_generator = ReconciliationCandidateGenerator(
+        maximum_candidates=resolved.ai_max_candidates_per_request,
+        maximum_date_difference_days=resolved.ai_candidate_max_date_difference_days,
+        maximum_amount_difference_ratio=resolved.ai_candidate_max_amount_difference_ratio,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -61,6 +66,7 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
     app.state.database = database
     app.state.file_storage = file_storage
     app.state.ai_inference_provider = ai_inference_provider
+    app.state.ai_candidate_generator = ai_candidate_generator
     register_exception_handlers(app)
     app.include_router(api_router, prefix=resolved.api_prefix)
 
