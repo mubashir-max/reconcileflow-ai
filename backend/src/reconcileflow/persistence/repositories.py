@@ -21,6 +21,7 @@ from .errors import InvalidStatusTransitionError, PersistenceConflictError, Reco
 from .models import (
     AuditEventRecord,
     AIMatchSuggestionRecord,
+    AIUsageRecord,
     BACKGROUND_JOB_STATUSES,
     BACKGROUND_JOB_PRIORITIES,
     BACKGROUND_JOB_EVENT_TYPES,
@@ -1349,6 +1350,19 @@ class AIMatchSuggestionRepository:
         self._session.flush()
         return record
 
+    def update_ai_usage_policy(
+        self, record: OrganizationRecord, *, hosted_ai_enabled: bool,
+        daily_request_limit: int, monthly_request_limit: int,
+        daily_token_limit: int, monthly_token_limit: int,
+    ) -> OrganizationRecord:
+        record.hosted_ai_enabled = hosted_ai_enabled
+        record.ai_daily_request_limit = daily_request_limit
+        record.ai_monthly_request_limit = monthly_request_limit
+        record.ai_daily_token_limit = daily_token_limit
+        record.ai_monthly_token_limit = monthly_token_limit
+        self._session.flush()
+        return record
+
     def get(self, suggestion_id: uuid.UUID, *, organization_id: uuid.UUID, lock: bool = False) -> AIMatchSuggestionRecord:
         statement = select(AIMatchSuggestionRecord).where(
             AIMatchSuggestionRecord.id == suggestion_id,
@@ -1448,6 +1462,97 @@ class AIMatchSuggestionRepository:
         if not normalized or len(normalized) > maximum:
             raise ValueError(f"{field} must be nonblank and at most {maximum} characters")
         return normalized
+
+
+class AIUsageRepository:
+    """Aggregate hosted-inference metering without sensitive request content."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def reserve(
+        self, *, organization_id: uuid.UUID, run_id: uuid.UUID, provider: str,
+        model_version: str, reserved_tokens: int, candidate_count: int,
+        expires_at: datetime,
+    ) -> AIUsageRecord:
+        run_exists = self._session.scalar(select(ReconciliationRunRecord.id).where(
+            ReconciliationRunRecord.id == run_id,
+            ReconciliationRunRecord.organization_id == organization_id,
+        ))
+        if run_exists is None:
+            raise RecordNotFoundError(f"reconciliation run {run_id} was not found")
+        record = AIUsageRecord(
+            organization_id=organization_id, run_id=run_id,
+            provider=provider, model_version=model_version,
+            reserved_tokens=reserved_tokens, candidate_count=candidate_count,
+            expires_at=_utc(expires_at),
+        )
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get(self, reservation_id: uuid.UUID, *, organization_id: uuid.UUID, lock: bool = False) -> AIUsageRecord:
+        statement = select(AIUsageRecord).where(
+            AIUsageRecord.id == reservation_id,
+            AIUsageRecord.organization_id == organization_id,
+        )
+        if lock:
+            statement = statement.with_for_update()
+        record = self._session.scalar(statement)
+        if record is None:
+            raise RecordNotFoundError(f"AI usage reservation {reservation_id} was not found")
+        return record
+
+    def finalize(
+        self, reservation_id: uuid.UUID, *, organization_id: uuid.UUID,
+        input_tokens: int, output_tokens: int, finalized_at: datetime,
+    ) -> AIUsageRecord:
+        record = self.get(reservation_id, organization_id=organization_id, lock=True)
+        if record.status != "RESERVED":
+            raise PersistenceConflictError("AI usage reservation is no longer active")
+        record.status = "FINALIZED"
+        record.input_tokens = input_tokens
+        record.output_tokens = output_tokens
+        record.finalized_at = _utc(finalized_at)
+        self._session.flush()
+        return record
+
+    def release(self, reservation_id: uuid.UUID, *, organization_id: uuid.UUID, released_at: datetime) -> AIUsageRecord:
+        record = self.get(reservation_id, organization_id=organization_id, lock=True)
+        if record.status == "RESERVED":
+            record.status = "RELEASED"
+            record.released_at = _utc(released_at)
+            self._session.flush()
+        return record
+
+    def release_expired(self, *, organization_id: uuid.UUID, now: datetime) -> int:
+        records = list(self._session.scalars(select(AIUsageRecord).where(
+            AIUsageRecord.organization_id == organization_id,
+            AIUsageRecord.status == "RESERVED",
+            AIUsageRecord.expires_at <= _utc(now),
+        )))
+        for record in records:
+            record.status = "RELEASED"
+            record.released_at = _utc(now)
+        self._session.flush()
+        return len(records)
+
+    def summarize(self, *, organization_id: uuid.UUID, since: datetime, now: datetime) -> tuple[int, int]:
+        active = or_(
+            AIUsageRecord.status == "FINALIZED",
+            and_(AIUsageRecord.status == "RESERVED", AIUsageRecord.expires_at > _utc(now)),
+        )
+        requests, tokens = self._session.execute(select(
+            func.coalesce(func.sum(AIUsageRecord.reserved_requests), 0),
+            func.coalesce(func.sum(case(
+                (AIUsageRecord.status == "FINALIZED", AIUsageRecord.input_tokens + AIUsageRecord.output_tokens),
+                else_=AIUsageRecord.reserved_tokens,
+            )), 0),
+        ).where(
+            AIUsageRecord.organization_id == organization_id,
+            AIUsageRecord.created_at >= _utc(since), active,
+        )).one()
+        return int(requests), int(tokens)
 
 
 class ReconciliationResultRepository:

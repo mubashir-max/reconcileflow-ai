@@ -58,3 +58,27 @@ class OrganizationStorageUsageResponse(StrictModel):
 
 class UpdateOrganizationStorageQuotaRequest(StrictModel):
     quota_bytes: int | None = Field(default=None, ge=0)
+
+
+class OrganizationAIUsagePolicy(StrictModel):
+    organization_id: uuid.UUID
+    hosted_ai_enabled: bool
+    daily_request_limit: int = Field(ge=0)
+    monthly_request_limit: int = Field(ge=0)
+    daily_token_limit: int = Field(ge=0)
+    monthly_token_limit: int = Field(ge=0)
+
+
+class UpdateOrganizationAIUsagePolicyRequest(StrictModel):
+    hosted_ai_enabled: bool
+    daily_request_limit: int = Field(ge=0, le=1_000_000)
+    monthly_request_limit: int = Field(ge=0, le=10_000_000)
+    daily_token_limit: int = Field(ge=0, le=10_000_000_000)
+    monthly_token_limit: int = Field(ge=0, le=100_000_000_000)
+
+
+class OrganizationAIUsageResponse(OrganizationAIUsagePolicy):
+    daily_requests: int = Field(ge=0)
+    daily_tokens: int = Field(ge=0)
+    monthly_requests: int = Field(ge=0)
+    monthly_tokens: int = Field(ge=0)

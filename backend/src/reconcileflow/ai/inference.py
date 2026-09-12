@@ -86,6 +86,8 @@ class AIInferenceResponse:
     suggestions: tuple[AIInferenceSuggestion, ...]
     model_version: str
     prompt_version: str
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     def __post_init__(self) -> None:
         if not self.model_version.strip() or len(self.model_version) > 100:
@@ -94,6 +96,11 @@ class AIInferenceResponse:
             raise AIInferenceResponseError("inference provider returned an invalid response")
         references = [item.candidate_reference for item in self.suggestions]
         if len(references) != len(set(references)):
+            raise AIInferenceResponseError("inference provider returned an invalid response")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (self.input_tokens, self.output_tokens)
+        ):
             raise AIInferenceResponseError("inference provider returned an invalid response")
 
 

@@ -55,6 +55,7 @@ async def test_migrated_postgresql_supports_complete_api_workflow(tmp_path):
             "background_job_events",
             "workers",
             "ai_match_suggestions",
+            "ai_usage_records",
         }
         assert expected_tables <= set(inspect(app.state.database.engine).get_table_names())
         assert {"timeout_seconds", "deadline_at", "priority"} <= {

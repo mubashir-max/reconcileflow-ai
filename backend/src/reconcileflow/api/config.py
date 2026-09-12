@@ -100,6 +100,8 @@ class APISettings(BaseSettings):
     ai_max_retries: int = Field(default=2, ge=0, le=5)
     ai_retry_backoff_seconds: float = Field(default=0.25, ge=0, le=10)
     ai_maximum_response_bytes: int = Field(default=262144, ge=1024, le=1048576)
+    ai_estimated_tokens_per_candidate: int = Field(default=256, ge=1, le=100000)
+    ai_usage_reservation_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     ai_evaluation_min_precision: float = Field(default=0.8, ge=0, le=1)
     ai_evaluation_min_recall: float = Field(default=0.8, ge=0, le=1)
     ai_evaluation_min_coverage: float = Field(default=0.8, ge=0, le=1)

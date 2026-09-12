@@ -149,6 +149,7 @@ class OpenAICompatibleInferenceProvider:
                 for content in item["content"] if content.get("type") == "output_text"
             )
             structured = json.loads(output_text)
+            usage = envelope.get("usage", {})
             suggestions = tuple(AIInferenceSuggestion(
                 candidate_reference=item["candidate_reference"],
                 confidence=item["confidence"],
@@ -163,4 +164,6 @@ class OpenAICompatibleInferenceProvider:
             suggestions=suggestions,
             model_version=self._model_version,
             prompt_version=request.prompt_version,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
         )
