@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,9 @@ from .inference import (
     AIInferenceResponse,
 )
 
+if TYPE_CHECKING:
+    from .usage import AIUsageController
+
 
 class AIMatchSuggestionWorkflow:
     """Generate, validate, and atomically persist advisory suggestions."""
@@ -29,6 +33,7 @@ class AIMatchSuggestionWorkflow:
         inference_provider: AIInferenceProvider, provider_name: str,
         prompt_version: str, inference_config_version: str,
         timeout_seconds: float, suggestion_ttl_days: int = 7,
+        usage_controller: AIUsageController | None = None,
     ) -> None:
         self._candidate_generator = candidate_generator
         self._inference_provider = inference_provider
@@ -43,6 +48,7 @@ class AIMatchSuggestionWorkflow:
             raise ValueError("suggestion_ttl_days must be between 1 and 90")
         self._timeout_seconds = timeout_seconds
         self._suggestion_ttl_days = suggestion_ttl_days
+        self._usage_controller = usage_controller
 
     async def generate_and_persist(
         self, *, session: Session, organization_id: uuid.UUID, run_id: uuid.UUID,
@@ -61,12 +67,29 @@ class AIMatchSuggestionWorkflow:
             features=tuple(candidate.features for candidate in candidates),
             prompt_version=self._prompt_version,
         )
+        reservation_id = None
+        if self._usage_controller is not None:
+            reservation_id = self._usage_controller.reserve(
+                organization_id=organization_id, run_id=run_id,
+                candidate_count=len(candidates),
+            )
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 response = await self._inference_provider.infer(request)
+            validated = _map_response(response, candidates, self._prompt_version)
         except TimeoutError as error:
+            if reservation_id is not None:
+                self._usage_controller.release(reservation_id, organization_id=organization_id)
             raise AIInferenceError("AI inference exceeded the configured timeout") from error
-        validated = _map_response(response, candidates, self._prompt_version)
+        except BaseException:
+            if reservation_id is not None:
+                self._usage_controller.release(reservation_id, organization_id=organization_id)
+            raise
+        if reservation_id is not None:
+            self._usage_controller.finalize(
+                reservation_id, organization_id=organization_id,
+                input_tokens=response.input_tokens, output_tokens=response.output_tokens,
+            )
 
         expires_at = datetime.now(UTC) + timedelta(days=self._suggestion_ttl_days)
         persisted: list[AIMatchSuggestionRecord] = []

@@ -59,6 +59,7 @@ BACKGROUND_JOB_EVENT_TYPES = (
 )
 WORKER_STATUSES = ("RUNNING", "STOPPED")
 AI_SUGGESTION_STATUSES = ("PENDING", "ACCEPTED", "REJECTED", "EXPIRED")
+AI_USAGE_STATUSES = ("RESERVED", "FINALIZED", "RELEASED")
 
 
 class OrganizationRecord(Base):
@@ -71,6 +72,10 @@ class OrganizationRecord(Base):
         CheckConstraint("slug = lower(slug) AND slug NOT LIKE '% %'", name="normalized_slug"),
         CheckConstraint("storage_quota_bytes IS NULL OR storage_quota_bytes >= 0", name="nonnegative_storage_quota"),
         CheckConstraint("storage_used_bytes >= 0", name="nonnegative_storage_usage"),
+        CheckConstraint("ai_daily_request_limit >= 0", name="nonnegative_ai_daily_requests"),
+        CheckConstraint("ai_monthly_request_limit >= 0", name="nonnegative_ai_monthly_requests"),
+        CheckConstraint("ai_daily_token_limit >= 0", name="nonnegative_ai_daily_tokens"),
+        CheckConstraint("ai_monthly_token_limit >= 0", name="nonnegative_ai_monthly_tokens"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -79,6 +84,11 @@ class OrganizationRecord(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     storage_quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     storage_used_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    hosted_ai_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    ai_daily_request_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    ai_monthly_request_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=1000, server_default="1000")
+    ai_daily_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=100000, server_default="100000")
+    ai_monthly_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1000000, server_default="1000000")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -91,6 +101,7 @@ class OrganizationRecord(Base):
         back_populates="organization"
     )
     ai_match_suggestions: Mapped[list[AIMatchSuggestionRecord]] = relationship(back_populates="organization")
+    ai_usage_records: Mapped[list[AIUsageRecord]] = relationship(back_populates="organization")
 
 
 class UserRecord(Base):
@@ -414,6 +425,40 @@ class AIMatchSuggestionRecord(Base):
     organization: Mapped[OrganizationRecord] = relationship(back_populates="ai_match_suggestions")
     run: Mapped[ReconciliationRunRecord] = relationship(back_populates="ai_match_suggestions")
     reviewed_by_user: Mapped[UserRecord | None] = relationship(back_populates="reviewed_ai_suggestions")
+
+
+class AIUsageRecord(Base):
+    """Tenant-scoped aggregate metering without prompts or candidate identifiers."""
+
+    __tablename__ = "ai_usage_records"
+    __table_args__ = (
+        CheckConstraint(f"status IN {AI_USAGE_STATUSES}", name="valid_status"),
+        CheckConstraint("reserved_requests = 1", name="single_reserved_request"),
+        CheckConstraint("reserved_tokens >= 0", name="nonnegative_reserved_tokens"),
+        CheckConstraint("input_tokens >= 0", name="nonnegative_input_tokens"),
+        CheckConstraint("output_tokens >= 0", name="nonnegative_output_tokens"),
+        CheckConstraint("candidate_count >= 0", name="nonnegative_candidate_count"),
+        Index("ix_ai_usage_organization_created", "organization_id", "created_at"),
+        Index("ix_ai_usage_active_reservations", "organization_id", "status", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reconciliation_runs.id", ondelete="RESTRICT"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="RESERVED", server_default="RESERVED")
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(150), nullable=False)
+    reserved_requests: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    reserved_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    organization: Mapped[OrganizationRecord] = relationship(back_populates="ai_usage_records")
 
 
 class ReconciliationResultRecord(Base):

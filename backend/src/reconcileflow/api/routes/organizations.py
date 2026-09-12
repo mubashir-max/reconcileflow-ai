@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from reconcileflow.persistence import PersistenceUnitOfWork, SessionDependency, StorageQuotaExceededError
 
@@ -17,6 +17,9 @@ from ..organization_schemas import (
     UpdateOrganizationRequest,
     OrganizationStorageUsageResponse,
     UpdateOrganizationStorageQuotaRequest,
+    OrganizationAIUsagePolicy,
+    OrganizationAIUsageResponse,
+    UpdateOrganizationAIUsagePolicyRequest,
 )
 from ..schemas import ErrorResponse
 
@@ -153,3 +156,57 @@ def update_storage_quota(
     except StorageQuotaExceededError as error:
         raise APIError(status_code=409, code="STORAGE_QUOTA_BELOW_USAGE", message="The quota cannot be lower than current storage usage.") from error
     return _storage_usage(record)
+
+
+def _ai_policy(record) -> OrganizationAIUsagePolicy:
+    return OrganizationAIUsagePolicy(
+        organization_id=record.id, hosted_ai_enabled=record.hosted_ai_enabled,
+        daily_request_limit=record.ai_daily_request_limit,
+        monthly_request_limit=record.ai_monthly_request_limit,
+        daily_token_limit=record.ai_daily_token_limit,
+        monthly_token_limit=record.ai_monthly_token_limit,
+    )
+
+
+@router.get("/{organization_id}/ai-usage", response_model=OrganizationAIUsageResponse, responses=ERROR_RESPONSES)
+def get_ai_usage(
+    organization_id: uuid.UUID, request: Request,
+    session: SessionDependency, tenant: TenantContextDependency,
+) -> OrganizationAIUsageResponse:
+    _ensure_selected(organization_id, tenant.organization_id)
+    record = PersistenceUnitOfWork(session).organizations.get(organization_id)
+    summary = request.app.state.ai_usage_controller.summary(organization_id)
+    return OrganizationAIUsageResponse(
+        **_ai_policy(record).model_dump(),
+        daily_requests=summary.daily_requests, daily_tokens=summary.daily_tokens,
+        monthly_requests=summary.monthly_requests, monthly_tokens=summary.monthly_tokens,
+    )
+
+
+@router.patch("/{organization_id}/ai-usage-policy", response_model=OrganizationAIUsagePolicy, responses=ERROR_RESPONSES)
+def update_ai_usage_policy(
+    organization_id: uuid.UUID, request: UpdateOrganizationAIUsagePolicyRequest,
+    session: SessionDependency, manager: MembershipManagerDependency,
+) -> OrganizationAIUsagePolicy:
+    _ensure_selected(organization_id, manager.organization_id)
+    with PersistenceUnitOfWork(session) as work:
+        record = work.organizations.get(organization_id, lock=True)
+        work.organizations.update_ai_usage_policy(
+            record, hosted_ai_enabled=request.hosted_ai_enabled,
+            daily_request_limit=request.daily_request_limit,
+            monthly_request_limit=request.monthly_request_limit,
+            daily_token_limit=request.daily_token_limit,
+            monthly_token_limit=request.monthly_token_limit,
+        )
+        work.security_audit_events.append(
+            organization_id=organization_id, actor_user_id=manager.user_id,
+            event_type="ORGANIZATION_AI_USAGE_POLICY_UPDATED",
+            details={
+                "hosted_ai_enabled": record.hosted_ai_enabled,
+                "daily_request_limit": record.ai_daily_request_limit,
+                "monthly_request_limit": record.ai_monthly_request_limit,
+                "daily_token_limit": record.ai_daily_token_limit,
+                "monthly_token_limit": record.ai_monthly_token_limit,
+            },
+        )
+    return _ai_policy(record)
